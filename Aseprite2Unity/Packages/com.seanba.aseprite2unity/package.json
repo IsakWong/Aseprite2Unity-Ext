@@ -1,21 +1,22 @@
 {
-  "name": "com.seanba.aseprite2unity",
-  "version": "2.3.0",
-  "displayName": "Aseprite2Unity",
-  "description": "Imports Aseprite files into Unity",
+  "name": "com.isakwong.aseprite2unity-ext",
+  "version": "1.0.0",
+  "displayName": "Aseprite2Unity-Ext",
+  "description": "Extended Aseprite importer for Unity with sprite atlas support and extensible import pipeline. Based on Aseprite2Unity by Sean Barton.",
   "unity": "2020.3",
   "dependencies": {
     "com.unity.burst": "1.0.0"
-  },  
+  },
   "keywords": [
     "Aseprite",
     "Importer",
-    "Plugin"
+    "Plugin",
+    "SpriteAtlas",
+    "Extension"
   ],
   "author": {
-    "name": "Sean Barton",
-    "email": "sean@seanba.com",
-    "url": "https://seanba.com/"
+    "name": "IsakWong",
+    "url": "https://github.com/IsakWong/Aseprite2Unity-Ext"
   },
   "samples": [
     {
