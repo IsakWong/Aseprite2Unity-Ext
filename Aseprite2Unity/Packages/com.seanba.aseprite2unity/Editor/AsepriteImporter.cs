@@ -14,7 +14,7 @@ namespace Aseprite2Unity.Editor
     public class AsepriteImporter : ScriptedImporter, IAseVisitor
     {
         // Editor fields
-        public float m_PixelsPerUnit = 100.0f;
+        public float m_PixelsPerUnit = 16.0f;
         public float m_FrameRate = 60.0f;
         public GameObject m_InstantiatedPrefab;
         public string m_SortingLayerName;
@@ -22,6 +22,21 @@ namespace Aseprite2Unity.Editor
         public AnimatorCullingMode m_AnimatorCullingMode = AnimatorCullingMode.AlwaysAnimate;
         public AnimatorController m_AnimatorController;
 
+        // Atlas settings
+        [Header("Atlas Settings")]
+        public bool m_CreateAtlas = true;
+        public int m_AtlasPadding = 0;
+
+        
+        [Header("Animation Settings")]
+        public bool m_CreateAnimations = true;
+        
+        // Processor settings - each AsepriteProcessor subclass can define its own serialized fields.
+        // These settings are persisted per-asset in the .meta file via [SerializeReference].
+        [SerializeReference]
+        public List<AsepriteProcessor> m_ProcessorSettings = new List<AsepriteProcessor>();
+        
+        
         // Properties based on file header
         public int CanvasWidth => m_AseFile.Header.Width;
         public int CanvasHeight => m_AseFile.Header.Height;
@@ -33,6 +48,9 @@ namespace Aseprite2Unity.Editor
         private readonly List<AseFrame> m_Frames = new List<AseFrame>();
         private readonly List<Sprite> m_Sprites = new List<Sprite>();
         private readonly List<AnimationClip> m_AnimationClips = new List<AnimationClip>();
+
+        // Atlas data - store frame canvases temporarily
+        private readonly List<AseCanvas> m_FrameCanvases = new List<AseCanvas>();
 
         private GameObject m_GameObject;
 
@@ -56,6 +74,9 @@ namespace Aseprite2Unity.Editor
             m_Errors.Clear();
 
 #if UNITY_2020_3_OR_NEWER
+            // Ensure processor settings are in sync with discovered processor types
+            AsepriteProcessorRegistry.EnsureProcessorSettings(this);
+            
             m_Context = ctx;
 
             using (var reader = new AseReader(m_Context.assetPath))
@@ -74,6 +95,7 @@ namespace Aseprite2Unity.Editor
         {
             m_GetPixelArgs.ColorDepth = ColorDepth;
             m_Pivot = null;
+            m_FrameCanvases.Clear();
 
             var icon = AssetDatabaseEx.LoadFirstAssetByFilter<Texture2D>("aseprite2unity-icon-0x1badd00d");
 
@@ -101,6 +123,12 @@ namespace Aseprite2Unity.Editor
 
         public void EndFileVisit(AseFile file)
         {
+            // Create atlas texture from all frames
+            if (m_CreateAtlas && m_FrameCanvases.Count > 0)
+            {
+                CreateAtlasAndSprites();
+            }
+
             BuildAnimations();
 
             // Add a sprite renderer if needed and assign our sprite to it
@@ -112,7 +140,10 @@ namespace Aseprite2Unity.Editor
                 renderer.sortingOrder = m_SortingOrder;
             }
 
-            renderer.sprite = m_Sprites[0];
+            if (m_Sprites.Count > 0)
+            {
+                renderer.sprite = m_Sprites[0];
+            }
 
             // Add an animator if needed
             var animator = m_GameObject.GetComponent<Animator>();
@@ -154,10 +185,41 @@ namespace Aseprite2Unity.Editor
                 }
             }
 
+            // Execute all registered processors before cleanup
+            // Processors can access sprites, clips, frames, layers, the AseFile, and the main GameObject
+            try
+            {
+                var result = new AsepriteImportResult(
+                    m_Context,
+                    this,
+                    m_AseFile,
+                    m_Sprites,
+                    m_AnimationClips,
+                    m_Frames,
+                    m_LayerChunks,
+                    m_AseFrameTagsChunk,
+                    m_GameObject
+                );
+                AsepriteProcessorRegistry.ProcessImport(m_Context, this, result);
+            }
+            catch (System.Exception e)
+            {
+                var errorMsg = $"Error in Aseprite processors: {e.Message}";
+                m_Errors.Add(errorMsg);
+                Debug.LogError($"{errorMsg}\n{e.StackTrace}");
+            }
+
+            // Cleanup
+            foreach (var canvas in m_FrameCanvases)
+            {
+                canvas?.Dispose();
+            }
+
             m_LayerChunks.Clear();
             m_Frames.Clear();
             m_Sprites.Clear();
             m_AnimationClips.Clear();
+            m_FrameCanvases.Clear();
             m_AseFrameTagsChunk = null;
             m_UniqueNameifierAnimations.Clear();
             m_GameObject = null;
@@ -171,30 +233,148 @@ namespace Aseprite2Unity.Editor
 
         public void EndFrameVisit(AseFrame frame)
         {
-            // Commit the frame by copying it to a Texture2D resource
-            var texture2d = m_FrameCanvas.ToTexture2D();
-            m_FrameCanvas.Dispose();
-            m_FrameCanvas = null;
+            // Store the canvas for atlas creation later
+            if (m_CreateAtlas)
+            {
+                m_FrameCanvases.Add(m_FrameCanvas);
+                // Don't dispose the canvas yet - we need it for atlas creation
+                m_FrameCanvas = null;
+            }
+            else
+            {
+                // Original behavior: create individual textures
+                var texture2d = m_FrameCanvas.ToTexture2D();
+                texture2d.filterMode = FilterMode.Point;
+                texture2d.wrapMode = TextureWrapMode.Clamp;
+                m_FrameCanvas.Dispose();
+                m_FrameCanvas = null;
 
-            // We should have everything we need to make a sprite and add it to our asset
+                var assetName = Path.GetFileNameWithoutExtension(assetPath);
+                var textureId = $"Textures._{m_Frames.Count - 1}";
+                var textureName = $"{assetName}.{textureId}";
+
+                texture2d.name = textureName;
+                m_Context.AddObjectToAsset(textureId, texture2d);
+
+                var pivot = m_Pivot ?? new Vector2(0.5f, 0.5f);
+                var sprite = Sprite.Create(texture2d, new Rect(0, 0, CanvasWidth, CanvasHeight), pivot, m_PixelsPerUnit);
+                m_Sprites.Add(sprite);
+
+                var spriteId = $"Sprites._{m_Sprites.Count - 1}";
+                var spriteName = $"{assetName}.{spriteId}";
+
+                sprite.name = spriteName;
+                m_Context.AddObjectToAsset(spriteId, sprite);
+            }
+        }
+
+        private void CreateAtlasAndSprites()
+        {
+            int frameCount = m_FrameCanvases.Count;
+            if (frameCount == 0) return;
+
+            // 计算网格列数，使 Atlas 尽量接近正方形
+            int cols = Mathf.CeilToInt(Mathf.Sqrt(frameCount));
+            int rows = Mathf.CeilToInt((float)frameCount / cols);
+
+            int cellW = CanvasWidth + m_AtlasPadding;
+            int cellH = CanvasHeight + m_AtlasPadding;
+            int atlasWidth = cols * CanvasWidth + (cols - 1) * m_AtlasPadding;
+            int atlasHeight = rows * CanvasHeight + (rows - 1) * m_AtlasPadding;
+
+            // Create atlas texture
+            Texture2D atlasTexture = new Texture2D(atlasWidth, atlasHeight, TextureFormat.RGBA32, false);
+            atlasTexture.filterMode = FilterMode.Point;
+            atlasTexture.wrapMode = TextureWrapMode.Clamp;
+            
+            // Fill with transparent pixels
+            Color32[] clearPixels = new Color32[atlasWidth * atlasHeight];
+            for (int i = 0; i < clearPixels.Length; i++)
+            {
+                clearPixels[i] = Color.clear;
+            }
+            atlasTexture.SetPixels32(clearPixels);
+
             var assetName = Path.GetFileNameWithoutExtension(assetPath);
-            var textureId = $"Textures._{m_Frames.Count - 1}";
-            var textureName = $"{assetName}.{textureId}";
-
-            // The texture should be ready to be added to our asset
-            texture2d.name = textureName;
-            m_Context.AddObjectToAsset(textureId, texture2d);
-
-            // Make a sprite out of the texture
             var pivot = m_Pivot ?? new Vector2(0.5f, 0.5f);
-            var sprite = Sprite.Create(texture2d, new Rect(0, 0, CanvasWidth, CanvasHeight), pivot, m_PixelsPerUnit);
-            m_Sprites.Add(sprite);
 
-            var spriteId = $"Sprites._{m_Sprites.Count - 1}";
-            var spriteName =  $"{assetName}.{spriteId}";
+            // Copy each frame into the atlas (grid layout, left-to-right, bottom-to-top)
+            for (int frameIndex = 0; frameIndex < frameCount; frameIndex++)
+            {
+                var canvas = m_FrameCanvases[frameIndex];
 
-            sprite.name = spriteName;
-            m_Context.AddObjectToAsset(spriteId, sprite);
+                int col = frameIndex % cols;
+                int row = frameIndex / cols;
+                int xOffset = col * cellW;
+                int yOffset = row * cellH;
+
+                // Copy pixels from canvas to atlas
+                unsafe
+                {
+                    var canvasPixels = (Color32*)canvas.Pixels.GetUnsafePtr();
+                    int canvasPixelCount = canvas.Pixels.Length;
+                    
+                    for (int y = 0; y < CanvasHeight; y++)
+                    {
+                        for (int x = 0; x < CanvasWidth; x++)
+                        {
+                            int canvasIndex = y * CanvasWidth + x;
+                            
+                            if (canvasIndex >= 0 && canvasIndex < canvasPixelCount)
+                            {
+                                int atlasX = xOffset + x;
+                                int atlasY = yOffset + y;
+                                
+                                if (atlasX >= 0 && atlasX < atlasWidth && atlasY >= 0 && atlasY < atlasHeight)
+                                {
+                                    atlasTexture.SetPixel(atlasX, atlasY, canvasPixels[canvasIndex]);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Apply pixel data
+            atlasTexture.Apply();
+            
+            // Flip the atlas texture to match Unity's coordinate system (bottom-left origin)
+            var renderTexture = new RenderTexture(atlasWidth, atlasHeight, 0, RenderTextureFormat.ARGB32, 0);
+            renderTexture.wrapMode = TextureWrapMode.Clamp;
+            renderTexture.filterMode = FilterMode.Point;
+            RenderTexture oldRenderTexture = RenderTexture.active;
+            RenderTexture.active = renderTexture;
+            {
+                Graphics.Blit(atlasTexture, renderTexture, new Vector2(1, -1), new Vector2(0, 1));
+                atlasTexture.ReadPixels(new Rect(0, 0, atlasWidth, atlasHeight), 0, 0);
+                atlasTexture.Apply();
+            }
+            RenderTexture.active = oldRenderTexture;
+            
+            var atlasName = $"{assetName}_Atlas";
+            atlasTexture.name = atlasName;
+            m_Context.AddObjectToAsset("Atlas", atlasTexture);
+
+            // Create sprites with correct coordinates (after vertical flip)
+            for (int frameIndex = 0; frameIndex < frameCount; frameIndex++)
+            {
+                int col = frameIndex % cols;
+                int row = frameIndex / cols;
+
+                // 翻转后：原始 row 0（底部）变成顶部，需要反转 Y
+                int xOffset = col * cellW;
+                int yOffset = atlasHeight - (row + 1) * CanvasHeight - row * m_AtlasPadding;
+
+                Rect spriteRect = new Rect(xOffset, yOffset, CanvasWidth, CanvasHeight);
+                var sprite = Sprite.Create(atlasTexture, spriteRect, pivot, m_PixelsPerUnit);
+                
+                var spriteId = $"Sprites._{frameIndex}";
+                var spriteName = $"{assetName}.{spriteId}";
+                sprite.name = spriteName;
+                
+                m_Sprites.Add(sprite);
+                m_Context.AddObjectToAsset(spriteId, sprite);
+            }
         }
 
         public void VisitCelChunk(AseCelChunk cel)
@@ -218,6 +398,7 @@ namespace Aseprite2Unity.Editor
                 {
                     var canvas = m_FrameCanvas;
                     var canvasPixels = (Color32*)canvas.Pixels.GetUnsafePtr();
+                    int canvasPixelCount = canvas.Pixels.Length;
 
                     m_GetPixelArgs.PixelBytes = cel.PixelBytes;
                     m_GetPixelArgs.Stride = cel.Width;
@@ -232,11 +413,20 @@ namespace Aseprite2Unity.Editor
                             {
                                 int cx = cel.PositionX + x;
                                 int cy = cel.PositionY + y;
-                                int index = cx + (cy * canvas.Width);
-
-                                Color32 basePixel = canvasPixels[index];
-                                Color32 blendedPixel = AseGraphics.BlendColors(layer.BlendMode, basePixel, celPixel);
-                                canvasPixels[index] = blendedPixel;
+                                
+                                // 边界检查：确保cx和cy在canvas范围内
+                                if (cx >= 0 && cx < canvas.Width && cy >= 0 && cy < canvas.Height)
+                                {
+                                    int index = cx + (cy * canvas.Width);
+                                    
+                                    // 双重保险：检查计算出的索引是否有效
+                                    if (index >= 0 && index < canvasPixelCount)
+                                    {
+                                        Color32 basePixel = canvasPixels[index];
+                                        Color32 blendedPixel = AseGraphics.BlendColors(layer.BlendMode, basePixel, celPixel);
+                                        canvasPixels[index] = blendedPixel;
+                                    }
+                                }
                             }
                         }
                     }
@@ -252,6 +442,7 @@ namespace Aseprite2Unity.Editor
                     {
                         var canvas = m_FrameCanvas;
                         var canvasPixels = (Color32*)canvas.Pixels.GetUnsafePtr();
+                        int canvasPixelCount = canvas.Pixels.Length;
 
                         m_GetPixelArgs.PixelBytes = tileset.PixelBytes;
                         m_GetPixelArgs.Stride = tileset.TileWidth;
@@ -281,14 +472,23 @@ namespace Aseprite2Unity.Editor
                                 {
                                     for (int ty = tymin, cy = cymin; ty < tymax && cy < cymax; ty++, cy++)
                                     {
-                                        Color32 tilePixel = AseGraphics.GetPixel(tx, ty, m_GetPixelArgs);
-                                        tilePixel.a = AseGraphics.CalculateOpacity(tilePixel.a, layer.Opacity, cel.Opacity);
-                                        if (tilePixel.a > 0)
+                                        // 边界检查：确保cx和cy在有效范围内
+                                        if (cx >= 0 && cx < canvas.Width && cy >= 0 && cy < canvas.Height)
                                         {
-                                            int canvasPixelIndex = cx + (cy * canvas.Width);
-                                            Color32 basePixel = canvasPixels[canvasPixelIndex];
-                                            Color32 blendedPixel = AseGraphics.BlendColors(layer.BlendMode, basePixel, tilePixel);
-                                            canvasPixels[canvasPixelIndex] = blendedPixel;
+                                            Color32 tilePixel = AseGraphics.GetPixel(tx, ty, m_GetPixelArgs);
+                                            tilePixel.a = AseGraphics.CalculateOpacity(tilePixel.a, layer.Opacity, cel.Opacity);
+                                            if (tilePixel.a > 0)
+                                            {
+                                                int canvasPixelIndex = cx + (cy * canvas.Width);
+                                                
+                                                // 双重保险：检查计算出的索引是否有效
+                                                if (canvasPixelIndex >= 0 && canvasPixelIndex < canvasPixelCount)
+                                                {
+                                                    Color32 basePixel = canvasPixels[canvasPixelIndex];
+                                                    Color32 blendedPixel = AseGraphics.BlendColors(layer.BlendMode, basePixel, tilePixel);
+                                                    canvasPixels[canvasPixelIndex] = blendedPixel;
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -375,24 +575,24 @@ namespace Aseprite2Unity.Editor
                 }
             }
 
-            if (frameIndices.Count > 0)
-            {
-                // Make an animation out of any left over (untagged) frames
-                MakeAnimationClip("Untagged", true, frameIndices);
-            }
+            // if (frameIndices.Count > 0)
+            // {
+            //     // Make an animation out of any left over (untagged) frames
+            //     MakeAnimationClip("Untagged", true, frameIndices);
+            // }
         }
 
         private void MakeAnimationClip(string animationName, bool isLooping, List<int> frameIndices)
         {
             animationName = m_UniqueNameifierAnimations.MakeUniqueName(animationName);
-            animationName = animationName.Replace('.', '_');
             var assetName = Path.GetFileNameWithoutExtension(assetPath);
-            var clipName = $"{assetName}_Clip_{animationName}";
-            var clipId = $"Clip_{animationName}";
+            var clipName = $"{assetName}.Clip.{animationName}";
+            var clipId = $"Clip.{animationName}";
 
             var clip = new AnimationClip();
             clip.name = clipName;
             clip.frameRate = m_FrameRate;
+            
 
             // Black magic for creating a sprite animation curve
             // from: https://answers.unity.com/questions/1080430/create-animation-clip-from-sprites-programmaticall.html

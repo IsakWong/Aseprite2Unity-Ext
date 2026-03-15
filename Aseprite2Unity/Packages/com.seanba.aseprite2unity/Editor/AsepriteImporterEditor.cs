@@ -14,18 +14,13 @@ namespace Aseprite2Unity.Editor
     {
         private readonly string[] m_AnimatorCullingModeNames = EnumExtensions.GetUpToDateEnumNames<AnimatorCullingMode>();
 
-        public override void OnEnable()
-        {
-            base.OnEnable();
-        }
-
         public override void OnInspectorGUI()
         {
             serializedObject.Update();
 
             var importer = serializedObject.targetObject as AsepriteImporter;
 
-            if (importer.Errors.Any())
+            if (importer != null && importer.Errors.Any())
             {
                 var asset = Path.GetFileName(importer.assetPath);
                 EditorGUILayout.LabelField("There were errors importing " + asset, EditorStyles.boldLabel);
@@ -36,6 +31,27 @@ namespace Aseprite2Unity.Editor
             EditorGUILayout.LabelField($"Aseprite2Unity Version: {Config.Version}");
             EditorGUILayout.Space();
 
+            // Atlas Settings Section
+            EditorGUILayout.LabelField("Atlas Settings", EditorStyles.boldLabel);
+            {
+                EditorGUI.indentLevel++;
+
+                EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(AsepriteImporter.m_CreateAtlas)),
+                    new GUIContent("Create Atlas", "Combine all frames into a single texture atlas."));
+
+                EditorGUI.BeginDisabledGroup(!serializedObject.FindProperty(nameof(AsepriteImporter.m_CreateAtlas)).boolValue);
+
+
+                EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(AsepriteImporter.m_AtlasPadding)),
+                    new GUIContent("Atlas Padding", "Padding in pixels between frames in the atlas."));
+
+                EditorGUI.EndDisabledGroup();
+
+                EditorGUI.indentLevel--;
+            }
+
+            EditorGUILayout.Space();
+
             ExportAnimatorControllerGui();
             EditorGUILayout.Space();
 
@@ -44,17 +60,17 @@ namespace Aseprite2Unity.Editor
                 EditorGUI.indentLevel++;
 
                 EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(AsepriteImporter.m_PixelsPerUnit)),
-                    new GUIContent("Pixels Per Unit", "How many pixels make up a unit. Default is 100. Use this the same as you would in the Texture Importer settings for sprites."));
+                    new GUIContent("Pixels Per Unit"));
 
                 EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(AsepriteImporter.m_InstantiatedPrefab)),
-                    new GUIContent("Instantiated Prefab", "Prefab that animated sprite is configured with. Use this to create sprites with additional scripting or components."));
+                    new GUIContent("Instantiated Prefab"));
 
                 DisplayStringChoiceProperty(serializedObject.FindProperty(nameof(AsepriteImporter.m_SortingLayerName)),
                     SortingLayer.layers.Select(l => l.name).ToArray(),
-                    new GUIContent("Sorting Layer", "Name of the SpriteRenderer's sorting layer. If Instantiated Prefab has a Sprite Renderer then this will not be used."));
+                    new GUIContent("Sorting Layer"));
 
                 EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(AsepriteImporter.m_SortingOrder)),
-                    new GUIContent("Order in Layer", "SpriteRenderer's order within a sorting layer. If Instantiated Prefab has a Sprite Renderer then this will not be used."));
+                    new GUIContent("Order in Layer"));
 
                 EditorGUI.indentLevel--;
             }
@@ -66,24 +82,35 @@ namespace Aseprite2Unity.Editor
                 EditorGUI.indentLevel++;
 
                 EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(AsepriteImporter.m_FrameRate)),
-                    new GUIContent("Frame Rate", "How often sprite animations are sampled."));
+                    new GUIContent("Frame Rate"));
 
                 EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(AsepriteImporter.m_AnimatorController)),
-                    new GUIContent("Animator Controller", "Animator Controller to use with the imported sprite. If Instantiated Prefab has an Animator component then this will not be used."));
+                    new GUIContent("Animator Controller"));
 
                 DisplayEnumProperty(serializedObject.FindProperty(nameof(AsepriteImporter.m_AnimatorCullingMode)),
                     m_AnimatorCullingModeNames,
-                    new GUIContent("Culling Mode", "Controls how the animation is updated when the object is culled. If Instantiated Prefab has an Animator component then this will not be used."));
+                    new GUIContent("Culling Mode"));
 
                 EditorGUI.indentLevel--;
             }
 
+
+            // Draw processor settings
+            DrawProcessorSettings();
+
+            // 全局配置快捷入口
+            DrawGlobalConfigSection();
+
             serializedObject.ApplyModifiedProperties();
 
-            ApplyRevertGUI();
-
             EditorGUILayout.HelpBox("Tip: You can change sprite pivot by adding a pivot slice named unity:pivot to your first frame in Aseprite.", MessageType.Info);
-            EditorGUILayout.HelpBox("Tip: Animations in Aseprite loop by default. Surround Frame Tag names with square brackets to disable looping. For example, [MyAnimName].", MessageType.Info);
+            
+            if (importer != null && importer.m_CreateAtlas)
+            {
+                EditorGUILayout.HelpBox("Atlas Mode: All frames will be combined into a single texture.", MessageType.Info);
+            }
+
+            ApplyRevertGUI();
         }
 
         private void ExportAnimatorControllerGui()
@@ -92,8 +119,8 @@ namespace Aseprite2Unity.Editor
             {
                 if (GUILayout.Button("Export Default Animator Controller"))
                 {
-                    // Creates the controller and prompts the user in case they are about to overwrite and existing file
-                    var animationControllerAssetPath = EditorUtility.SaveFilePanelInProject("Save Animator Controller", $"{Path.GetFileNameWithoutExtension(importer.assetPath)}.AnimatorController",
+                    var animationControllerAssetPath = EditorUtility.SaveFilePanelInProject("Save Animator Controller",
+                        $"{Path.GetFileNameWithoutExtension(importer.assetPath)}.AnimatorController",
                         "controller",
                         "Chose location for Animation Controller",
                         Path.GetDirectoryName(importer.assetPath));
@@ -104,12 +131,10 @@ namespace Aseprite2Unity.Editor
 
                         if (controller == null)
                         {
-                            // We're using a brand new animator controller
-                            controller = UnityEditor.Animations.AnimatorController.CreateAnimatorControllerAtPath(animationControllerAssetPath);
+                            controller = AnimatorController.CreateAnimatorControllerAtPath(animationControllerAssetPath);
                         }
                         else
                         {
-                            // Remove old states from animator controller that already exists
                             var machine = controller.layers[0].stateMachine;
                             foreach (var state in machine.states.ToArray())
                             {
@@ -117,7 +142,6 @@ namespace Aseprite2Unity.Editor
                             }
                         }
 
-                        // Add a state for every animation clip in our Aseprite asset
                         var fsm = controller.layers[0].stateMachine;
                         var position = fsm.entryPosition;
                         position.x += 200;
@@ -126,19 +150,108 @@ namespace Aseprite2Unity.Editor
                         var clips = AssetDatabase.LoadAllAssetsAtPath(importer.assetPath).OfType<AnimationClip>().OrderBy(a => a.name);
                         foreach (var clip in clips)
                         {
-                            var name = clip.name;
-                            if (name.StartsWith(prefix))
+                            var clipName = clip.name;
+                            if (clipName.StartsWith(prefix))
                             {
-                                name = name.Substring(prefix.Length);
+                                clipName = clipName.Substring(prefix.Length);
                             }
 
-                            name = name.Replace('.', '_');
-                            var state = fsm.AddState(name, position);
+                            clipName = clipName.Replace('.', '_');
+                            var state = fsm.AddState(clipName, position);
                             state.motion = clip;
                             position.y += 80;
                         }
                     }
                 }
+            }
+        }
+
+        private void DrawProcessorSettings()
+        {
+            var importer = serializedObject.targetObject as AsepriteImporter;
+            if (importer == null) return;
+
+            // Ensure settings are in sync
+            AsepriteProcessorRegistry.EnsureProcessorSettings(importer);
+            serializedObject.Update();
+
+            var listProp = serializedObject.FindProperty(nameof(AsepriteImporter.m_ProcessorSettings));
+            if (listProp == null || !listProp.isArray) return;
+
+            for (int i = 0; i < listProp.arraySize; i++)
+            {
+                var elementProp = listProp.GetArrayElementAtIndex(i);
+                if (elementProp == null) continue;
+
+                // Only process managed reference elements
+                if (elementProp.propertyType != SerializedPropertyType.ManagedReference)
+                    continue;
+
+                // Get the display name from the actual object instance
+                var processor = (i < importer.m_ProcessorSettings.Count) ? importer.m_ProcessorSettings[i] : null;
+                if (processor == null) continue;
+
+                EditorGUILayout.Space();
+                EditorGUILayout.LabelField(processor.DisplayName, EditorStyles.boldLabel);
+                EditorGUI.indentLevel++;
+
+                // Draw all visible children of this processor element
+                var childProp = elementProp.Copy();
+                var endProp = elementProp.GetEndProperty();
+                bool enterChildren = true;
+
+                while (childProp.NextVisible(enterChildren) && !SerializedProperty.EqualContents(childProp, endProp))
+                {
+                    enterChildren = false;
+                    EditorGUILayout.PropertyField(childProp, true);
+                }
+
+                EditorGUI.indentLevel--;
+            }
+        }
+
+        private void DrawGlobalConfigSection()
+        {
+            EditorGUILayout.Space();
+
+            var config = AsepriteImportConfig.Find();
+            if (config != null)
+            {
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.LabelField("全局配置", EditorStyles.boldLabel);
+                if (GUILayout.Button("选择", GUILayout.Width(50)))
+                {
+                    EditorGUIUtility.PingObject(config);
+                    Selection.activeObject = config;
+                }
+                EditorGUILayout.EndHorizontal();
+            }
+            else
+            {
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.LabelField("全局配置", EditorStyles.boldLabel);
+                if (GUILayout.Button("创建", GUILayout.Width(50)))
+                {
+                    var newConfig = ScriptableObject.CreateInstance<AsepriteImportConfig>();
+                    var path = "Assets/Config/AsepriteImportConfig.asset";
+
+                    // 确保目录存在
+                    var dir = Path.GetDirectoryName(path);
+                    if (!string.IsNullOrEmpty(dir) && !AssetDatabase.IsValidFolder(dir))
+                    {
+                        System.IO.Directory.CreateDirectory(dir);
+                        AssetDatabase.Refresh();
+                    }
+
+                    AssetDatabase.CreateAsset(newConfig, path);
+                    AssetDatabase.SaveAssets();
+                    AsepriteImportConfig.ClearCache();
+                    EditorGUIUtility.PingObject(newConfig);
+                    Selection.activeObject = newConfig;
+                }
+                EditorGUILayout.EndHorizontal();
+
+                EditorGUILayout.HelpBox("未找到 AsepriteImportConfig 资源。点击「创建」生成全局配置，或通过 Assets → Create → Aseprite2Unity → Import Config 手动创建。", MessageType.Info);
             }
         }
 
