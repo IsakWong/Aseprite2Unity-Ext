@@ -20,6 +20,13 @@ namespace Aseprite2Unity.Editor
 
             var importer = serializedObject.targetObject as AsepriteImporter;
 
+            // 同步 Processor Settings 列表，然后刷新 serializedObject
+            if (importer != null)
+            {
+                AsepriteProcessorRegistry.EnsureSettings(importer);
+                serializedObject.Update();
+            }
+
             if (importer != null && importer.Errors.Any())
             {
                 var asset = Path.GetFileName(importer.assetPath);
@@ -101,8 +108,6 @@ namespace Aseprite2Unity.Editor
             // 全局配置快捷入口
             DrawGlobalConfigSection();
 
-            serializedObject.ApplyModifiedProperties();
-
             EditorGUILayout.HelpBox("Tip: You can change sprite pivot by adding a pivot slice named unity:pivot to your first frame in Aseprite.", MessageType.Info);
             
             if (importer != null && importer.m_CreateAtlas)
@@ -168,39 +173,37 @@ namespace Aseprite2Unity.Editor
 
         private void DrawProcessorSettings()
         {
-            var importer = serializedObject.targetObject as AsepriteImporter;
-            if (importer == null) return;
-
-            // Ensure settings are in sync
-            AsepriteProcessorRegistry.EnsureProcessorSettings(importer);
-            serializedObject.Update();
-
             var listProp = serializedObject.FindProperty(nameof(AsepriteImporter.m_ProcessorSettings));
-            if (listProp == null || !listProp.isArray) return;
+            if (listProp == null || !listProp.isArray || listProp.arraySize == 0) return;
+
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("Processor Settings", EditorStyles.boldLabel);
 
             for (int i = 0; i < listProp.arraySize; i++)
             {
                 var elementProp = listProp.GetArrayElementAtIndex(i);
                 if (elementProp == null) continue;
+                if (elementProp.propertyType != SerializedPropertyType.ManagedReference) continue;
 
-                // Only process managed reference elements
-                if (elementProp.propertyType != SerializedPropertyType.ManagedReference)
-                    continue;
+                // 获取 Settings 实例以读取 DisplayName
+                var importer = serializedObject.targetObject as AsepriteImporter;
+                AsepriteProcessorSettings settings = null;
+                if (importer != null && i < importer.m_ProcessorSettings.Count)
+                    settings = importer.m_ProcessorSettings[i];
 
-                // Get the display name from the actual object instance
-                var processor = (i < importer.m_ProcessorSettings.Count) ? importer.m_ProcessorSettings[i] : null;
-                if (processor == null) continue;
+                string label = settings?.DisplayName ?? elementProp.managedReferenceFullTypename;
 
-                EditorGUILayout.Space();
-                EditorGUILayout.LabelField(processor.DisplayName, EditorStyles.boldLabel);
+                EditorGUILayout.Space(4);
+                EditorGUILayout.LabelField(label, EditorStyles.boldLabel);
                 EditorGUI.indentLevel++;
 
-                // Draw all visible children of this processor element
+                // 绘制所有可见子属性
                 var childProp = elementProp.Copy();
                 var endProp = elementProp.GetEndProperty();
                 bool enterChildren = true;
 
-                while (childProp.NextVisible(enterChildren) && !SerializedProperty.EqualContents(childProp, endProp))
+                while (childProp.NextVisible(enterChildren) &&
+                       !SerializedProperty.EqualContents(childProp, endProp))
                 {
                     enterChildren = false;
                     EditorGUILayout.PropertyField(childProp, true);

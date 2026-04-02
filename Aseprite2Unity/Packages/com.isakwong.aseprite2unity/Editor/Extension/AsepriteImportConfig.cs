@@ -3,8 +3,9 @@
 namespace Aseprite2Unity.Editor
 {
     /// <summary>
-    /// Aseprite 导入全局配置。
-    /// 提供所有 AsepriteProcessor 共享的默认资源引用。
+    /// Aseprite 导入全局配置（插件级）。
+    /// 仅包含所有 Processor 共享的通用默认值。
+    /// 游戏专属配置请使用业务层的 JasaImportConfig。
     /// 
     /// 创建方式：Assets → Create → Aseprite2Unity → Import Config
     /// 推荐路径：Assets/Config/AsepriteImportConfig.asset
@@ -14,12 +15,6 @@ namespace Aseprite2Unity.Editor
     {
         [Tooltip("默认材质（用于 SpriteRenderer）")]
         public Material DefaultMaterial;
-
-        [Tooltip("不可破坏障碍物基础预制体（新建障碍物时基于此创建 Prefab Variant）")]
-        public GameObject ObstacleBasePrefab;
-        
-        [Tooltip("可破坏障碍物基础预制体（新建障碍物时基于此创建 Prefab Variant）")]
-        public GameObject BreakBasePrefab;
 
         // ---- 单例查找 ----
 
