@@ -8,284 +8,216 @@ using UnityEngine;
 namespace Aseprite2Unity.Editor
 {
     /// <summary>
-    /// Registry for Aseprite processors.
-    /// Automatically discovers and manages all AsepriteProcessor subclasses.
+    /// Aseprite Processor 注册表。
+    /// 自动发现所有 AsepriteProcessor 子类，管理 Settings 同步与导入执行。
     /// </summary>
     public static class AsepriteProcessorRegistry
     {
         private static List<AsepriteProcessor> s_Processors;
         private static bool s_Initialized = false;
 
-        /// <summary>
-        /// Get all registered processors, sorted by ProcessOrder.
-        /// </summary>
+        /// <summary>所有已注册的 Processor（按 ProcessOrder 排序）</summary>
         public static IReadOnlyList<AsepriteProcessor> Processors
         {
             get
             {
-                if (!s_Initialized)
-                {
-                    Initialize();
-                }
+                if (!s_Initialized) Initialize();
                 return s_Processors;
             }
         }
 
-        /// <summary>
-        /// Initialize the registry by discovering all processor types.
-        /// </summary>
+        // ================================================================
+        //  初始化
+        // ================================================================
+
         public static void Initialize()
         {
-            if (s_Initialized)
-                return;
+            if (s_Initialized) return;
 
             s_Processors = new List<AsepriteProcessor>();
 
             try
             {
-                // Find all types that inherit from AsepriteProcessor
                 var processorTypes = AppDomain.CurrentDomain.GetAssemblies()
-                    .SelectMany(assembly => GetTypesFromAssembly(assembly))
-                    .Where(type => type != null &&
-                                   !type.IsAbstract &&
-                                   typeof(AsepriteProcessor).IsAssignableFrom(type))
+                    .SelectMany(GetTypesFromAssembly)
+                    .Where(t => t != null && !t.IsAbstract && typeof(AsepriteProcessor).IsAssignableFrom(t))
                     .ToList();
 
-                // Create instances of all processor types
-                foreach (var processorType in processorTypes)
+                foreach (var type in processorTypes)
                 {
                     try
                     {
-                        var processor = Activator.CreateInstance(processorType) as AsepriteProcessor;
-                        if (processor != null)
+                        if (Activator.CreateInstance(type) is AsepriteProcessor processor)
                         {
                             s_Processors.Add(processor);
-                            Debug.Log($"[AsepriteProcessorRegistry] Registered processor: {processorType.Name}");
                         }
                     }
                     catch (Exception e)
                     {
-                        Debug.LogError($"[AsepriteProcessorRegistry] Failed to create processor instance: {processorType.Name}\n{e.Message}");
+                        Debug.LogError($"[AsepriteProcessorRegistry] 创建 Processor 失败: {type.Name}\n{e.Message}");
                     }
                 }
 
-                // Sort processors by execution order
                 s_Processors.Sort((a, b) => a.ProcessOrder.CompareTo(b.ProcessOrder));
-
                 s_Initialized = true;
-
-                Debug.Log($"[AsepriteProcessorRegistry] Initialized with {s_Processors.Count} processor(s)");
             }
             catch (Exception e)
             {
-                Debug.LogError($"[AsepriteProcessorRegistry] Failed to initialize: {e.Message}\n{e.StackTrace}");
+                Debug.LogError($"[AsepriteProcessorRegistry] 初始化失败: {e.Message}\n{e.StackTrace}");
                 s_Processors = new List<AsepriteProcessor>();
                 s_Initialized = true;
             }
         }
 
+        // ================================================================
+        //  Settings 同步
+        // ================================================================
+
         /// <summary>
-        /// Execute all registered processors for the given import context.
-        /// Uses the importer's persisted processor settings (m_ProcessorSettings) for execution.
+        /// 确保 Importer 的 m_ProcessorSettings 列表与注册表中的 Processor 保持同步。
+        /// - 为每个声明了 SettingsType 的 Processor 确保列表中有一个对应实例
+        /// - 移除不再存在的 Settings 类型
+        /// - 保留已有实例的用户修改
+        /// 
+        /// 调用时机：Editor 绘制 Inspector 前、导入执行前。
         /// </summary>
-        /// <param name="ctx">The asset import context</param>
-        /// <param name="importer">The Aseprite importer instance</param>
-        /// <param name="result">The import result containing sprites, clips, frames, and shared data</param>
-        public static void ProcessImport(AssetImportContext ctx, AsepriteImporter importer, AsepriteImportResult result)
+        public static void EnsureSettings(AsepriteImporter importer)
         {
-            if (!s_Initialized)
+            if (!s_Initialized) Initialize();
+            if (importer == null) return;
+
+            importer.m_ProcessorSettings ??= new List<AsepriteProcessorSettings>();
+
+            // 收集注册表中所有需要 Settings 的类型
+            var expectedTypes = new HashSet<Type>();
+            foreach (var p in s_Processors)
             {
-                Initialize();
+                if (p.SettingsType != null)
+                    expectedTypes.Add(p.SettingsType);
             }
 
-            // Use the importer's persisted settings, sorted by ProcessOrder
-            var processors = importer.m_ProcessorSettings;
-            if (processors == null || processors.Count == 0)
-            {
-                return;
-            }
+            // 移除已不存在的类型 或 null
+            importer.m_ProcessorSettings.RemoveAll(s => s == null || !expectedTypes.Contains(s.GetType()));
 
-            // Sort by ProcessOrder (stable sort preserves registration order for equal values)
-            var sortedProcessors = processors
-                .Where(p => p != null)
-                .OrderBy(p => p.ProcessOrder)
-                .ToList();
+            // 已有类型集合
+            var existingTypes = new HashSet<Type>(
+                importer.m_ProcessorSettings.Where(s => s != null).Select(s => s.GetType()));
 
-            foreach (var processor in sortedProcessors)
+            // 补齐缺失的 Settings
+            foreach (var type in expectedTypes)
             {
+                if (existingTypes.Contains(type)) continue;
+
                 try
                 {
-                    // Check if processor should run
-                    if (!processor.ShouldProcess(ctx, importer, result))
+                    if (Activator.CreateInstance(type) is AsepriteProcessorSettings newSettings)
                     {
-                        continue;
-                    }
-
-                    // Execute processor main logic
-                    processor.OnImportAseprite(ctx, importer, result);
-
-                    // Execute chunk visitor traversal if processor needs it
-                    if (processor.NeedVisitChunks && result.AseFile != null)
-                    {
-                        processor.PerformChunkVisit(result);
+                        importer.m_ProcessorSettings.Add(newSettings);
+                        existingTypes.Add(type);
                     }
                 }
                 catch (Exception e)
                 {
-                    // Let processor handle the error
-                    try
-                    {
-                        processor.OnProcessError(ctx, importer, result, e);
-                    }
-                    catch (Exception errorHandlingException)
-                    {
-                        Debug.LogError($"[AsepriteProcessorRegistry] Error in error handler for {processor.GetType().Name}: {errorHandlingException.Message}");
-                    }
+                    Debug.LogError($"[AsepriteProcessorRegistry] 创建 Settings 失败: {type.Name}\n{e.Message}");
                 }
             }
         }
 
+        // ================================================================
+        //  导入执行
+        // ================================================================
+
         /// <summary>
-        /// Ensure the importer's processor settings list contains one instance per discovered processor type.
-        /// Adds new processor types and removes types that no longer exist, preserving existing settings.
-        /// Call this from the importer editor or during import to keep the list in sync.
+        /// 执行所有已注册的 Processor。
+        /// 自动同步 Settings、注入到 Processor、构建 ImportResult、按序执行。
         /// </summary>
-        /// <param name="importer">The importer to synchronize</param>
-        public static void EnsureProcessorSettings(AsepriteImporter importer)
+        public static void ProcessImport(AssetImportContext ctx, AsepriteImporter importer)
         {
-            if (!s_Initialized)
+            if (!s_Initialized) Initialize();
+            if (s_Processors == null || s_Processors.Count == 0) return;
+
+            // 同步 Settings 列表
+            EnsureSettings(importer);
+
+            // 按类型建立 Settings 查找表
+            var settingsMap = new Dictionary<Type, AsepriteProcessorSettings>();
+            if (importer.m_ProcessorSettings != null)
             {
-                Initialize();
-            }
-
-            if (importer.m_ProcessorSettings == null)
-            {
-                importer.m_ProcessorSettings = new List<AsepriteProcessor>();
-            }
-
-            // Build a set of expected processor types from the registry
-            var expectedTypes = s_Processors
-                .Where(p => p != null)
-                .Select(p => p.GetType())
-                .ToHashSet();
-
-            // Remove entries whose type no longer exists (or are null)
-            importer.m_ProcessorSettings.RemoveAll(p => p == null || !expectedTypes.Contains(p.GetType()));
-
-            // Build a set of types already present in the importer's settings
-            var existingTypes = new HashSet<Type>(
-                importer.m_ProcessorSettings
-                    .Where(p => p != null)
-                    .Select(p => p.GetType())
-            );
-
-            // Add missing processor types with default instances
-            foreach (var registryProcessor in s_Processors)
-            {
-                if (registryProcessor == null) continue;
-                var type = registryProcessor.GetType();
-                if (!existingTypes.Contains(type))
+                foreach (var s in importer.m_ProcessorSettings)
                 {
-                    var newProcessor = Activator.CreateInstance(type) as AsepriteProcessor;
-                    if (newProcessor != null)
+                    if (s != null)
+                        settingsMap[s.GetType()] = s;
+                }
+            }
+
+            // 构建导入结果上下文
+            var result = new AsepriteImportResult(
+                ctx, importer,
+                importer.AseFileData,
+                importer.Sprites,
+                importer.AnimClips,
+                importer.Frames,
+                importer.LayerChunks,
+                importer.FrameTagsChunk,
+                importer.ImportedGameObject);
+
+            foreach (var processor in s_Processors)
+            {
+                // 注入 Settings
+                if (processor.SettingsType != null &&
+                    settingsMap.TryGetValue(processor.SettingsType, out var settings))
+                {
+                    processor.InjectSettings(settings);
+                }
+
+                try
+                {
+                    if (!processor.ShouldProcess(ctx, importer, result))
+                        continue;
+
+                    processor.OnImportAseprite(ctx, importer, result);
+
+                    if (processor.NeedVisitChunks && result.AseFile != null)
+                        processor.PerformChunkVisit(result);
+                }
+                catch (Exception e)
+                {
+                    try { processor.OnProcessError(ctx, importer, result, e); }
+                    catch (Exception ee)
                     {
-                        importer.m_ProcessorSettings.Add(newProcessor);
-                        existingTypes.Add(type);
+                        Debug.LogError($"[AsepriteProcessorRegistry] {processor.GetType().Name} 错误处理器异常: {ee.Message}");
                     }
                 }
             }
         }
 
-        /// <summary>
-        /// Clear the registry. Useful for testing or reinitialization.
-        /// </summary>
+        // ================================================================
+        //  工具方法
+        // ================================================================
+
         public static void Clear()
         {
-            if (s_Processors != null)
-            {
-                s_Processors.Clear();
-            }
+            s_Processors?.Clear();
             s_Initialized = false;
         }
 
-        /// <summary>
-        /// Reload the registry by clearing and reinitializing.
-        /// </summary>
         public static void Reload()
         {
             Clear();
             Initialize();
         }
 
-        /// <summary>
-        /// Get a processor by type.
-        /// </summary>
-        /// <typeparam name="T">The processor type</typeparam>
-        /// <returns>The processor instance, or null if not found</returns>
         public static T GetProcessor<T>() where T : AsepriteProcessor
         {
-            if (!s_Initialized)
-            {
-                Initialize();
-            }
-
+            if (!s_Initialized) Initialize();
             return s_Processors.OfType<T>().FirstOrDefault();
         }
 
-        /// <summary>
-        /// Safely get types from an assembly, handling potential load errors.
-        /// </summary>
         private static Type[] GetTypesFromAssembly(Assembly assembly)
         {
-            try
-            {
-                return assembly.GetTypes();
-            }
-            catch (ReflectionTypeLoadException e)
-            {
-                // Return the types that were successfully loaded
-                return e.Types.Where(t => t != null).ToArray();
-            }
-            catch (Exception)
-            {
-                // If assembly can't be loaded, return empty array
-                return new Type[0];
-            }
-        }
-
-        /// <summary>
-        /// Get detailed information about registered processors.
-        /// Useful for debugging.
-        /// </summary>
-        public static string GetRegistryInfo()
-        {
-            if (!s_Initialized)
-            {
-                Initialize();
-            }
-
-            var info = new System.Text.StringBuilder();
-            info.AppendLine("=== Aseprite Processor Registry ===");
-            info.AppendLine($"Total Processors: {s_Processors.Count}");
-            info.AppendLine();
-
-            for (int i = 0; i < s_Processors.Count; i++)
-            {
-                var processor = s_Processors[i];
-                if (processor != null)
-                {
-                    info.AppendLine($"{i + 1}. {processor.GetType().Name}");
-                    info.AppendLine($"   Order: {processor.ProcessOrder}");
-                    info.AppendLine($"   Type: {processor.GetType().FullName}");
-                }
-                else
-                {
-                    info.AppendLine($"{i + 1}. [NULL]");
-                }
-                info.AppendLine();
-            }
-
-            return info.ToString();
+            try { return assembly.GetTypes(); }
+            catch (ReflectionTypeLoadException e) { return e.Types.Where(t => t != null).ToArray(); }
+            catch { return Array.Empty<Type>(); }
         }
     }
 }

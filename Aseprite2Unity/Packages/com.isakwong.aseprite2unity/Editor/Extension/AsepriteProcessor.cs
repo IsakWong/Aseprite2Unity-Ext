@@ -1,147 +1,81 @@
-﻿using System;
+using System;
 using UnityEditor.AssetImporters;
 using UnityEngine;
 
 namespace Aseprite2Unity.Editor
 {
     /// <summary>
-    /// Base class for Aseprite import processors.
-    /// Inherit from this class to extend Aseprite import functionality.
-    /// All processors will be automatically discovered and executed during import.
-    /// 
-    /// Processors support two complementary processing modes:
-    /// 1. Override OnImportAseprite() for result-based processing (access Sprites, Clips, etc.)
-    /// 2. Override Visit*() methods for Visitor-pattern chunk traversal (access raw Aseprite data)
-    /// 
-    /// The execution order is: OnImportAseprite() first, then Visit*() traversal (if enabled).
+    /// Aseprite 导入处理器基类。
+    /// 纯逻辑，不持有序列化数据——Per-Asset 配置通过关联的 AsepriteProcessorSettings 子类存储。
+    ///
+    /// 两种继承方式：
+    /// 1. AsepriteProcessor&lt;TSettings&gt; —— 需要 Per-Asset 配置的处理器（推荐）
+    /// 2. AsepriteProcessor —— 无需配置的轻量处理器
+    ///
+    /// 处理器支持两种互补的处理模式：
+    /// 1. 重写 OnImportAseprite() —— 基于导入结果（Sprites、Clips 等）
+    /// 2. 重写 Visit*() 方法 —— Visitor 模式遍历原始 Aseprite 数据
+    ///
+    /// 执行顺序：OnImportAseprite() 先于 Visit*() 遍历。
     /// </summary>
-    [System.Serializable]
     public abstract class AsepriteProcessor
     {
-        /// <summary>
-        /// Display name shown in the Importer Inspector.
-        /// Override to provide a human-readable name for this processor.
-        /// Default is the class name.
-        /// </summary>
+        /// <summary>Inspector 中显示的名称</summary>
         public virtual string DisplayName => GetType().Name;
 
-        /// <summary>
-        /// Execution order of this processor. Lower values execute first.
-        /// Default is 0. Use negative values for pre-processing, positive for post-processing.
-        /// </summary>
+        /// <summary>执行顺序，值越小越先执行。默认 0。</summary>
         public virtual int ProcessOrder => 0;
 
-        /// <summary>
-        /// Whether this processor needs Visitor-pattern traversal of AseFile chunks.
-        /// Override and return true to enable Visit*() callbacks after OnImportAseprite().
-        /// Default is false (only OnImportAseprite is called).
-        /// </summary>
+        /// <summary>关联的 Settings 类型。无配置的处理器返回 null。</summary>
+        public virtual Type SettingsType => null;
+
+        /// <summary>是否需要 Visitor 模式遍历 AseFile Chunks</summary>
         public virtual bool NeedVisitChunks => false;
 
         /// <summary>
-        /// Called during Aseprite asset import.
-        /// Override this method to add custom processing logic.
+        /// 导入时调用。重写此方法添加自定义处理逻辑。
         /// </summary>
-        /// <param name="ctx">The asset import context</param>
-        /// <param name="importer">The Aseprite importer instance</param>
-        /// <param name="result">The import result containing sprites, clips, frames, and shared data</param>
         public abstract void OnImportAseprite(AssetImportContext ctx, AsepriteImporter importer, AsepriteImportResult result);
 
         /// <summary>
-        /// Called before OnImportAseprite to check if this processor should run.
-        /// Override to add custom conditions.
+        /// 在 OnImportAseprite 前调用，返回 false 跳过此处理器。
         /// </summary>
-        /// <param name="ctx">The asset import context</param>
-        /// <param name="importer">The Aseprite importer instance</param>
-        /// <param name="result">The import result containing sprites, clips, frames, and shared data</param>
-        /// <returns>True if the processor should run, false otherwise</returns>
         public virtual bool ShouldProcess(AssetImportContext ctx, AsepriteImporter importer, AsepriteImportResult result)
         {
             return true;
         }
 
         /// <summary>
-        /// Called when an error occurs during processing.
-        /// Override to handle errors gracefully.
+        /// 处理出错时的回调。
         /// </summary>
-        /// <param name="ctx">The asset import context</param>
-        /// <param name="importer">The Aseprite importer instance</param>
-        /// <param name="result">The import result containing sprites, clips, frames, and shared data</param>
-        /// <param name="exception">The exception that occurred</param>
-        public virtual void OnProcessError(AssetImportContext ctx, AsepriteImporter importer, AsepriteImportResult result, System.Exception exception)
+        public virtual void OnProcessError(AssetImportContext ctx, AsepriteImporter importer, AsepriteImportResult result, Exception exception)
         {
             Debug.LogError($"[{GetType().Name}] Error processing {ctx.assetPath}: {exception.Message}\n{exception.StackTrace}");
         }
 
-        /// <summary>
-        /// 获取全局导入配置（可能为 null）。
-        /// Processor 可通过此属性读取共享默认值，字段自身值为空/默认时回退到全局配置。
-        /// </summary>
+        /// <summary>获取全局导入配置（可能为 null）</summary>
         protected static AsepriteImportConfig GlobalConfig => AsepriteImportConfig.Find();
 
-        // ---- Visitor-pattern callbacks ----
-        // Override these methods to process raw Aseprite data (requires NeedVisitChunks = true).
-        // These are called after OnImportAseprite(), following the same traversal order as AseFile.VisitContents().
+        // ---- 内部：供 Registry 注入当前 Settings 实例 ----
+        internal virtual void InjectSettings(AsepriteProcessorSettings settings) { }
 
-        /// <summary>
-        /// Called at the beginning of file traversal.
-        /// </summary>
+        // ---- Visitor 回调 ----
+
         public virtual void BeginFileVisit(AseFile file, AsepriteImportResult result) { }
-
-        /// <summary>
-        /// Called at the end of file traversal.
-        /// </summary>
         public virtual void EndFileVisit(AseFile file, AsepriteImportResult result) { }
-
-        /// <summary>
-        /// Called at the beginning of each frame.
-        /// </summary>
         public virtual void BeginFrameVisit(AseFrame frame, int frameIndex, AsepriteImportResult result) { }
-
-        /// <summary>
-        /// Called at the end of each frame.
-        /// </summary>
         public virtual void EndFrameVisit(AseFrame frame, int frameIndex, AsepriteImportResult result) { }
-
-        /// <summary>
-        /// Called for each layer chunk.
-        /// </summary>
         public virtual void VisitLayerChunk(AseLayerChunk layer, AsepriteImportResult result) { }
-
-        /// <summary>
-        /// Called for each cel chunk (pixel data within a frame/layer).
-        /// </summary>
         public virtual void VisitCelChunk(AseCelChunk cel, AsepriteImportResult result) { }
-
-        /// <summary>
-        /// Called when frame tags are encountered (animation tag definitions).
-        /// </summary>
         public virtual void VisitFrameTagsChunk(AseFrameTagsChunk frameTags, AsepriteImportResult result) { }
-
-        /// <summary>
-        /// Called for palette data.
-        /// </summary>
         public virtual void VisitPaletteChunk(AsePaletteChunk palette, AsepriteImportResult result) { }
-
-        /// <summary>
-        /// Called for user data attached to chunks.
-        /// </summary>
         public virtual void VisitUserDataChunk(AseUserDataChunk userData, AsepriteImportResult result) { }
-
-        /// <summary>
-        /// Called for slice data (e.g. pivot definitions).
-        /// </summary>
         public virtual void VisitSliceChunk(AseSliceChunk slice, AsepriteImportResult result) { }
-
-        /// <summary>
-        /// Called for tileset data.
-        /// </summary>
         public virtual void VisitTilesetChunk(AseTilesetChunk tileset, AsepriteImportResult result) { }
 
         /// <summary>
-        /// Perform visitor-pattern traversal of the AseFile for this processor.
-        /// Called by the registry after OnImportAseprite() when NeedVisitChunks is true.
-        /// Generally you should NOT override this method; override the individual Visit*() methods instead.
+        /// 执行 Visitor 遍历。由 Registry 在 OnImportAseprite() 之后调用。
+        /// 通常不需要重写，重写各个 Visit*() 方法即可。
         /// </summary>
         internal void PerformChunkVisit(AsepriteImportResult result)
         {
@@ -157,7 +91,16 @@ namespace Aseprite2Unity.Editor
 
                 foreach (var chunk in frame.Chunks)
                 {
-                    DispatchChunk(chunk, result);
+                    switch (chunk)
+                    {
+                        case AseLayerChunk layer: VisitLayerChunk(layer, result); break;
+                        case AseCelChunk cel: VisitCelChunk(cel, result); break;
+                        case AseFrameTagsChunk frameTags: VisitFrameTagsChunk(frameTags, result); break;
+                        case AsePaletteChunk palette: VisitPaletteChunk(palette, result); break;
+                        case AseUserDataChunk userData: VisitUserDataChunk(userData, result); break;
+                        case AseSliceChunk slice: VisitSliceChunk(slice, result); break;
+                        case AseTilesetChunk tileset: VisitTilesetChunk(tileset, result); break;
+                    }
                 }
 
                 EndFrameVisit(frame, frameIndex, result);
@@ -165,36 +108,47 @@ namespace Aseprite2Unity.Editor
 
             EndFileVisit(aseFile, result);
         }
+    }
 
+    /// <summary>
+    /// 带 Per-Asset 配置的处理器泛型基类。
+    /// TSettings 的实例通过 [SerializeReference] 存储在每个 .aseprite 资源的 .meta 文件中，
+    /// 在 Inspector 中可逐资源编辑。
+    ///
+    /// 用法示例：
+    /// <code>
+    /// [Serializable]
+    /// public class MySettings : AsepriteProcessorSettings
+    /// {
+    ///     public bool enabled = true;
+    ///     public string sortingLayer = "Default";
+    /// }
+    ///
+    /// public class MyProcessor : AsepriteProcessor&lt;MySettings&gt;
+    /// {
+    ///     public override void OnImportAseprite(...) {
+    ///         if (!Settings.enabled) return;
+    ///         // 使用 Settings.sortingLayer ...
+    ///     }
+    /// }
+    /// </code>
+    /// </summary>
+    /// <typeparam name="TSettings">关联的配置类型</typeparam>
+    public abstract class AsepriteProcessor<TSettings> : AsepriteProcessor
+        where TSettings : AsepriteProcessorSettings, new()
+    {
         /// <summary>
-        /// Dispatch a chunk to the appropriate Visit method based on its type.
+        /// 当前资源的配置实例。
+        /// 由 Registry 在每次导入前注入，保证在 ShouldProcess / OnImportAseprite / Visit* 中可用。
+        /// 如果 Importer 上尚无此类型的 Settings，则使用 new TSettings() 默认值。
         /// </summary>
-        private void DispatchChunk(AseChunk chunk, AsepriteImportResult result)
+        public TSettings Settings { get; private set; } = new TSettings();
+
+        public sealed override Type SettingsType => typeof(TSettings);
+
+        internal sealed override void InjectSettings(AsepriteProcessorSettings settings)
         {
-            switch (chunk)
-            {
-                case AseLayerChunk layer:
-                    VisitLayerChunk(layer, result);
-                    break;
-                case AseCelChunk cel:
-                    VisitCelChunk(cel, result);
-                    break;
-                case AseFrameTagsChunk frameTags:
-                    VisitFrameTagsChunk(frameTags, result);
-                    break;
-                case AsePaletteChunk palette:
-                    VisitPaletteChunk(palette, result);
-                    break;
-                case AseUserDataChunk userData:
-                    VisitUserDataChunk(userData, result);
-                    break;
-                case AseSliceChunk slice:
-                    VisitSliceChunk(slice, result);
-                    break;
-                case AseTilesetChunk tileset:
-                    VisitTilesetChunk(tileset, result);
-                    break;
-            }
+            Settings = settings as TSettings ?? new TSettings();
         }
     }
 }

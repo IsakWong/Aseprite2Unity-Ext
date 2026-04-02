@@ -10,7 +10,7 @@ using UnityEngine;
 
 namespace Aseprite2Unity.Editor
 {
-    [ScriptedImporter(6, new string[] { "aseprite", "ase" }, 5000)]
+    [ScriptedImporter(7, new string[] { "aseprite", "ase" }, 5000)]
     public class AsepriteImporter : ScriptedImporter, IAseVisitor
     {
         // Editor fields
@@ -22,20 +22,24 @@ namespace Aseprite2Unity.Editor
         public AnimatorCullingMode m_AnimatorCullingMode = AnimatorCullingMode.AlwaysAnimate;
         public AnimatorController m_AnimatorController;
 
+        public string m_DefaultAnimationName = "Default";
         // Atlas settings
         [Header("Atlas Settings")]
         public bool m_CreateAtlas = true;
+        [Tooltip("Atlas layout: Horizontal (frames side by side) or Vertical (frames stacked)")]
+        public bool m_HorizontalLayout = false;
         public int m_AtlasPadding = 0;
 
+        [Header("Material Settings")]
+        public Material m_DefaultMaterial;
         
         [Header("Animation Settings")]
         public bool m_CreateAnimations = true;
-        
-        // Processor settings - each AsepriteProcessor subclass can define its own serialized fields.
-        // These settings are persisted per-asset in the .meta file via [SerializeReference].
+
+        // ---- Per-Asset Processor 配置 ----
+        // 通过 [SerializeReference] 多态存储，每个 .aseprite 文件独立序列化到 .meta
         [SerializeReference]
-        public List<AsepriteProcessor> m_ProcessorSettings = new List<AsepriteProcessor>();
-        
+        public List<AsepriteProcessorSettings> m_ProcessorSettings = new List<AsepriteProcessorSettings>();
         
         // Properties based on file header
         public int CanvasWidth => m_AseFile.Header.Width;
@@ -48,6 +52,39 @@ namespace Aseprite2Unity.Editor
         private readonly List<AseFrame> m_Frames = new List<AseFrame>();
         private readonly List<Sprite> m_Sprites = new List<Sprite>();
         private readonly List<AnimationClip> m_AnimationClips = new List<AnimationClip>();
+
+        /// <summary>
+        /// Tag 名称 → 对应帧范围的 Sprite 列表。
+        /// 在 BuildAnimations 中与动画剪辑同步填充，供业务层 Processor 直接按 Tag 名获取 Sprite。
+        /// </summary>
+        private readonly Dictionary<string, List<Sprite>> m_TagSprites = new Dictionary<string, List<Sprite>>();
+
+        /// <summary>
+        /// 获取按 Tag 分组的 Sprite 字典（只读）。
+        /// Key 为 Aseprite 中 FrameTag 的名称，Value 为该 Tag 帧范围内的 Sprite 列表。
+        /// </summary>
+        public IReadOnlyDictionary<string, List<Sprite>> TagSprites => m_TagSprites;
+
+        /// <summary>导入生成的所有 Sprite（按帧顺序）</summary>
+        public IReadOnlyList<Sprite> Sprites => m_Sprites;
+
+        /// <summary>导入生成的所有 AnimationClip</summary>
+        public IReadOnlyList<AnimationClip> AnimClips => m_AnimationClips;
+
+        /// <summary>导入过程中解析的所有帧数据</summary>
+        public IReadOnlyList<AseFrame> Frames => m_Frames;
+
+        /// <summary>导入过程中解析的所有图层数据</summary>
+        public IReadOnlyList<AseLayerChunk> LayerChunks => m_LayerChunks;
+
+        /// <summary>帧标签数据</summary>
+        public AseFrameTagsChunk FrameTagsChunk => m_AseFrameTagsChunk;
+
+        /// <summary>解析后的 Aseprite 文件对象</summary>
+        public AseFile AseFileData => m_AseFile;
+
+        /// <summary>导入生成的主 GameObject</summary>
+        public GameObject ImportedGameObject => m_GameObject;
 
         // Atlas data - store frame canvases temporarily
         private readonly List<AseCanvas> m_FrameCanvases = new List<AseCanvas>();
@@ -74,15 +111,25 @@ namespace Aseprite2Unity.Editor
             m_Errors.Clear();
 
 #if UNITY_2020_3_OR_NEWER
-            // Ensure processor settings are in sync with discovered processor types
-            AsepriteProcessorRegistry.EnsureProcessorSettings(this);
-            
             m_Context = ctx;
 
             using (var reader = new AseReader(m_Context.assetPath))
             {
                 m_AseFile = new AseFile(reader);
                 m_AseFile.VisitContents(this);
+            }
+
+            // TODO: Execute all registered processors
+            // Uncomment this after verifying the processor system compiles:
+            try
+            {
+                AsepriteProcessorRegistry.ProcessImport(ctx, this);
+            }
+            catch (System.Exception e)
+            {
+                var errorMsg = $"Error in Aseprite processors: {e.Message}";
+                m_Errors.Add(errorMsg);
+                Debug.LogError($"{errorMsg}\n{e.StackTrace}");
             }
 #else
             string msg = string.Format("Aesprite2Unity requires Unity 2020.3 or later. You are using {0}", Application.unityVersion);
@@ -185,30 +232,6 @@ namespace Aseprite2Unity.Editor
                 }
             }
 
-            // Execute all registered processors before cleanup
-            // Processors can access sprites, clips, frames, layers, the AseFile, and the main GameObject
-            try
-            {
-                var result = new AsepriteImportResult(
-                    m_Context,
-                    this,
-                    m_AseFile,
-                    m_Sprites,
-                    m_AnimationClips,
-                    m_Frames,
-                    m_LayerChunks,
-                    m_AseFrameTagsChunk,
-                    m_GameObject
-                );
-                AsepriteProcessorRegistry.ProcessImport(m_Context, this, result);
-            }
-            catch (System.Exception e)
-            {
-                var errorMsg = $"Error in Aseprite processors: {e.Message}";
-                m_Errors.Add(errorMsg);
-                Debug.LogError($"{errorMsg}\n{e.StackTrace}");
-            }
-
             // Cleanup
             foreach (var canvas in m_FrameCanvases)
             {
@@ -219,6 +242,7 @@ namespace Aseprite2Unity.Editor
             m_Frames.Clear();
             m_Sprites.Clear();
             m_AnimationClips.Clear();
+            m_TagSprites.Clear();
             m_FrameCanvases.Clear();
             m_AseFrameTagsChunk = null;
             m_UniqueNameifierAnimations.Clear();
@@ -273,14 +297,21 @@ namespace Aseprite2Unity.Editor
             int frameCount = m_FrameCanvases.Count;
             if (frameCount == 0) return;
 
-            // 计算网格列数，使 Atlas 尽量接近正方形
-            int cols = Mathf.CeilToInt(Mathf.Sqrt(frameCount));
-            int rows = Mathf.CeilToInt((float)frameCount / cols);
-
-            int cellW = CanvasWidth + m_AtlasPadding;
-            int cellH = CanvasHeight + m_AtlasPadding;
-            int atlasWidth = cols * CanvasWidth + (cols - 1) * m_AtlasPadding;
-            int atlasHeight = rows * CanvasHeight + (rows - 1) * m_AtlasPadding;
+            int atlasWidth, atlasHeight;
+            
+            // Calculate atlas dimensions based on layout
+            if (m_HorizontalLayout)
+            {
+                // Horizontal layout: frames side by side
+                atlasWidth = CanvasWidth * frameCount + m_AtlasPadding * (frameCount - 1);
+                atlasHeight = CanvasHeight;
+            }
+            else
+            {
+                // Vertical layout: frames stacked
+                atlasWidth = CanvasWidth;
+                atlasHeight = CanvasHeight * frameCount + m_AtlasPadding * (frameCount - 1);
+            }
 
             // Create atlas texture
             Texture2D atlasTexture = new Texture2D(atlasWidth, atlasHeight, TextureFormat.RGBA32, false);
@@ -298,15 +329,25 @@ namespace Aseprite2Unity.Editor
             var assetName = Path.GetFileNameWithoutExtension(assetPath);
             var pivot = m_Pivot ?? new Vector2(0.5f, 0.5f);
 
-            // Copy each frame into the atlas (grid layout, left-to-right, bottom-to-top)
+            // Copy each frame into the atlas
             for (int frameIndex = 0; frameIndex < frameCount; frameIndex++)
             {
                 var canvas = m_FrameCanvases[frameIndex];
-
-                int col = frameIndex % cols;
-                int row = frameIndex / cols;
-                int xOffset = col * cellW;
-                int yOffset = row * cellH;
+                
+                int xOffset, yOffset;
+                
+                if (m_HorizontalLayout)
+                {
+                    // Horizontal: frames go left to right
+                    xOffset = frameIndex * (CanvasWidth + m_AtlasPadding);
+                    yOffset = 0;
+                }
+                else
+                {
+                    // Vertical: frames go bottom to top
+                    xOffset = 0;
+                    yOffset = frameIndex * (CanvasHeight + m_AtlasPadding);
+                }
 
                 // Copy pixels from canvas to atlas
                 unsafe
@@ -320,6 +361,7 @@ namespace Aseprite2Unity.Editor
                         {
                             int canvasIndex = y * CanvasWidth + x;
                             
+                            // 边界检查：确保不越界访问canvas数组
                             if (canvasIndex >= 0 && canvasIndex < canvasPixelCount)
                             {
                                 int atlasX = xOffset + x;
@@ -339,6 +381,7 @@ namespace Aseprite2Unity.Editor
             atlasTexture.Apply();
             
             // Flip the atlas texture to match Unity's coordinate system (bottom-left origin)
+            // This is the same as what AseCanvas.ToTexture2D() does
             var renderTexture = new RenderTexture(atlasWidth, atlasHeight, 0, RenderTextureFormat.ARGB32, 0);
             renderTexture.wrapMode = TextureWrapMode.Clamp;
             renderTexture.filterMode = FilterMode.Point;
@@ -355,16 +398,28 @@ namespace Aseprite2Unity.Editor
             atlasTexture.name = atlasName;
             m_Context.AddObjectToAsset("Atlas", atlasTexture);
 
-            // Create sprites with correct coordinates (after vertical flip)
+            // Now create sprites with correct coordinates (after the texture has been flipped)
             for (int frameIndex = 0; frameIndex < frameCount; frameIndex++)
             {
-                int col = frameIndex % cols;
-                int row = frameIndex / cols;
+                int xOffset, yOffset;
+                
+                if (m_HorizontalLayout)
+                {
+                    // Horizontal: frames go left to right
+                    xOffset = frameIndex * (CanvasWidth + m_AtlasPadding);
+                    // After vertical flip, calculate Y from bottom
+                    yOffset = atlasHeight - CanvasHeight;
+                }
+                else
+                {
+                    // Vertical: frames stacked
+                    xOffset = 0;
+                    // After vertical flip, frames are now top to bottom, so reverse the index
+                    // Bottom frame (index 0) is now at top, top frame (last index) is now at bottom
+                    yOffset = atlasHeight - (frameIndex + 1) * CanvasHeight - frameIndex * m_AtlasPadding;
+                }
 
-                // 翻转后：原始 row 0（底部）变成顶部，需要反转 Y
-                int xOffset = col * cellW;
-                int yOffset = atlasHeight - (row + 1) * CanvasHeight - row * m_AtlasPadding;
-
+                // Create sprite for this frame with flipped coordinates
                 Rect spriteRect = new Rect(xOffset, yOffset, CanvasWidth, CanvasHeight);
                 var sprite = Sprite.Create(atlasTexture, spriteRect, pivot, m_PixelsPerUnit);
                 
@@ -569,6 +624,15 @@ namespace Aseprite2Unity.Editor
                 {
                     var animIndices = Enumerable.Range(entry.FromFrame, entry.ToFrame - entry.FromFrame + 1).ToList();
                     MakeAnimationClip(entry.Name, !entry.IsOneShot, animIndices);
+
+                    // 同步填充 TagSprites 字典
+                    var tagSpriteList = new List<Sprite>(animIndices.Count);
+                    foreach (var idx in animIndices)
+                    {
+                        if (idx >= 0 && idx < m_Sprites.Count)
+                            tagSpriteList.Add(m_Sprites[idx]);
+                    }
+                    m_TagSprites[entry.Name] = tagSpriteList;
 
                     // Remove the indices from the pool of animation frames
                     frameIndices.RemoveAll(i => i >= animIndices.First() && i <= animIndices.Last());
