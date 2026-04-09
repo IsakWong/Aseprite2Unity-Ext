@@ -70,85 +70,17 @@ namespace Aseprite2Unity.Editor
         }
 
         // ================================================================
-        //  Settings 同步
-        // ================================================================
-
-        /// <summary>
-        /// 确保 Importer 的 m_ProcessorSettings 列表与注册表中的 Processor 保持同步。
-        /// - 为每个声明了 SettingsType 的 Processor 确保列表中有一个对应实例
-        /// - 移除不再存在的 Settings 类型
-        /// - 保留已有实例的用户修改
-        /// 
-        /// 调用时机：Editor 绘制 Inspector 前、导入执行前。
-        /// </summary>
-        public static void EnsureSettings(AsepriteImporter importer)
-        {
-            if (!s_Initialized) Initialize();
-            if (importer == null) return;
-
-            importer.m_ProcessorSettings ??= new List<AsepriteProcessorSettings>();
-
-            // 收集注册表中所有需要 Settings 的类型
-            var expectedTypes = new HashSet<Type>();
-            foreach (var p in s_Processors)
-            {
-                if (p.SettingsType != null)
-                    expectedTypes.Add(p.SettingsType);
-            }
-
-            // 移除已不存在的类型 或 null
-            importer.m_ProcessorSettings.RemoveAll(s => s == null || !expectedTypes.Contains(s.GetType()));
-
-            // 已有类型集合
-            var existingTypes = new HashSet<Type>(
-                importer.m_ProcessorSettings.Where(s => s != null).Select(s => s.GetType()));
-
-            // 补齐缺失的 Settings
-            foreach (var type in expectedTypes)
-            {
-                if (existingTypes.Contains(type)) continue;
-
-                try
-                {
-                    if (Activator.CreateInstance(type) is AsepriteProcessorSettings newSettings)
-                    {
-                        importer.m_ProcessorSettings.Add(newSettings);
-                        existingTypes.Add(type);
-                    }
-                }
-                catch (Exception e)
-                {
-                    Debug.LogError($"[AsepriteProcessorRegistry] 创建 Settings 失败: {type.Name}\n{e.Message}");
-                }
-            }
-        }
-
-        // ================================================================
         //  导入执行
         // ================================================================
 
         /// <summary>
         /// 执行所有已注册的 Processor。
-        /// 自动同步 Settings、注入到 Processor、构建 ImportResult、按序执行。
+        /// Processor 使用各自的默认 Settings（无 Per-Asset 配置）。
         /// </summary>
         public static void ProcessImport(AssetImportContext ctx, AsepriteImporter importer)
         {
             if (!s_Initialized) Initialize();
             if (s_Processors == null || s_Processors.Count == 0) return;
-
-            // 同步 Settings 列表
-            EnsureSettings(importer);
-
-            // 按类型建立 Settings 查找表
-            var settingsMap = new Dictionary<Type, AsepriteProcessorSettings>();
-            if (importer.m_ProcessorSettings != null)
-            {
-                foreach (var s in importer.m_ProcessorSettings)
-                {
-                    if (s != null)
-                        settingsMap[s.GetType()] = s;
-                }
-            }
 
             // 构建导入结果上下文
             var result = new AsepriteImportResult(
@@ -163,13 +95,6 @@ namespace Aseprite2Unity.Editor
 
             foreach (var processor in s_Processors)
             {
-                // 注入 Settings
-                if (processor.SettingsType != null &&
-                    settingsMap.TryGetValue(processor.SettingsType, out var settings))
-                {
-                    processor.InjectSettings(settings);
-                }
-
                 try
                 {
                     if (!processor.ShouldProcess(ctx, importer, result))

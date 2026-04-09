@@ -57,6 +57,14 @@ namespace Aseprite2Unity.Editor
 
             // Check that we read the right amount of bytes
             Assert.IsTrue((reader.Position - pos) == size, string.Format("Chunk {0} read {1} bytes but we were expecting {2} bytes read", type, reader.Position - pos, size));
+
+            // 非 UserData chunk 出现时，清除 FrameTag 分发状态
+            if (type != ChunkType.UserData)
+            {
+                reader.PendingFrameTagsChunk = null;
+                reader.PendingFrameTagIndex = 0;
+            }
+
             reader.LastChunk = chunk;
 
             return chunk;

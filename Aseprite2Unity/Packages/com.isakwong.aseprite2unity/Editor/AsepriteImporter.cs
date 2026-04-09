@@ -10,12 +10,18 @@ using UnityEngine;
 
 namespace Aseprite2Unity.Editor
 {
-    [ScriptedImporter(7, new string[] { "aseprite", "ase" }, 5000)]
+    // [ScriptedImporter] 特性已移至业务层子类 JasaAsepriteImporter
+    // 保留为可继承基类，不直接注册扩展名
     public class AsepriteImporter : ScriptedImporter, IAseVisitor
     {
-        // Editor fields
+        // Editor fields — 逐资源覆盖值
+        [Header("Override Settings")]
+        public bool m_OverridePixelsPerUnit;
         public float m_PixelsPerUnit = 16.0f;
+        
+        public bool m_OverrideFrameRate;
         public float m_FrameRate = 60.0f;
+        
         public GameObject m_InstantiatedPrefab;
         public string m_SortingLayerName;
         public int m_SortingOrder;
@@ -25,21 +31,91 @@ namespace Aseprite2Unity.Editor
         public string m_DefaultAnimationName = "Default";
         // Atlas settings
         [Header("Atlas Settings")]
+        public bool m_OverrideCreateAtlas;
         public bool m_CreateAtlas = true;
-        [Tooltip("Atlas layout: Horizontal (frames side by side) or Vertical (frames stacked)")]
-        public bool m_HorizontalLayout = false;
+        
+        public bool m_OverrideAtlasPadding;
         public int m_AtlasPadding = 0;
 
         [Header("Material Settings")]
+        public bool m_OverrideMaterial;
         public Material m_DefaultMaterial;
         
         [Header("Animation Settings")]
+        public bool m_OverrideCreateAnimations;
         public bool m_CreateAnimations = true;
 
-        // ---- Per-Asset Processor 配置 ----
-        // 通过 [SerializeReference] 多态存储，每个 .aseprite 文件独立序列化到 .meta
-        [SerializeReference]
-        public List<AsepriteProcessorSettings> m_ProcessorSettings = new List<AsepriteProcessorSettings>();
+        // ================================================================
+        //  解析有效值：Override → 全局配置 → 字段默认值
+        // ================================================================
+
+        /// <summary>有效的 PixelsPerUnit（考虑全局配置）</summary>
+        public float EffectivePixelsPerUnit
+        {
+            get
+            {
+                if (m_OverridePixelsPerUnit) return m_PixelsPerUnit;
+                var cfg = AsepriteImportConfig.Find();
+                return cfg != null ? cfg.DefaultPixelsPerUnit : m_PixelsPerUnit;
+            }
+        }
+
+        /// <summary>有效的帧率（考虑全局配置）</summary>
+        public float EffectiveFrameRate
+        {
+            get
+            {
+                if (m_OverrideFrameRate) return m_FrameRate;
+                var cfg = AsepriteImportConfig.Find();
+                return cfg != null ? cfg.DefaultFrameRate : m_FrameRate;
+            }
+        }
+
+        /// <summary>有效的 CreateAtlas（考虑全局配置）</summary>
+        public bool EffectiveCreateAtlas
+        {
+            get
+            {
+                if (m_OverrideCreateAtlas) return m_CreateAtlas;
+                var cfg = AsepriteImportConfig.Find();
+                return cfg != null ? cfg.DefaultCreateAtlas : m_CreateAtlas;
+            }
+        }
+
+        /// <summary>有效的 AtlasPadding（考虑全局配置）</summary>
+        public int EffectiveAtlasPadding
+        {
+            get
+            {
+                if (m_OverrideAtlasPadding) return m_AtlasPadding;
+                var cfg = AsepriteImportConfig.Find();
+                return cfg != null ? cfg.DefaultAtlasPadding : m_AtlasPadding;
+            }
+        }
+
+        /// <summary>有效的材质（考虑全局配置）</summary>
+        public Material EffectiveMaterial
+        {
+            get
+            {
+                if (m_OverrideMaterial) return m_DefaultMaterial;
+                var cfg = AsepriteImportConfig.Find();
+                return cfg != null ? cfg.DefaultMaterial : m_DefaultMaterial;
+            }
+        }
+
+        /// <summary>有效的 CreateAnimations（考虑全局配置）</summary>
+        public bool EffectiveCreateAnimations
+        {
+            get
+            {
+                if (m_OverrideCreateAnimations) return m_CreateAnimations;
+                var cfg = AsepriteImportConfig.Find();
+                return cfg != null ? cfg.DefaultCreateAnimations : m_CreateAnimations;
+            }
+        }
+
+        // Per-Asset Processor 配置已移除，Processor 使用默认值
         
         // Properties based on file header
         public int CanvasWidth => m_AseFile.Header.Width;
@@ -119,8 +195,7 @@ namespace Aseprite2Unity.Editor
                 m_AseFile.VisitContents(this);
             }
 
-            // TODO: Execute all registered processors
-            // Uncomment this after verifying the processor system compiles:
+            // Processor 在 EndFileVisit 之后执行，此时所有数据（Sprites/AnimClips/TagSprites）均已就绪
             try
             {
                 AsepriteProcessorRegistry.ProcessImport(ctx, this);
@@ -131,6 +206,9 @@ namespace Aseprite2Unity.Editor
                 m_Errors.Add(errorMsg);
                 Debug.LogError($"{errorMsg}\n{e.StackTrace}");
             }
+
+            // Processor 全部执行完毕后再清理临时数据
+            CleanupImportData();
 #else
             string msg = string.Format("Aesprite2Unity requires Unity 2020.3 or later. You are using {0}", Application.unityVersion);
             m_Errors.Add(msg);
@@ -171,7 +249,7 @@ namespace Aseprite2Unity.Editor
         public void EndFileVisit(AseFile file)
         {
             // Create atlas texture from all frames
-            if (m_CreateAtlas && m_FrameCanvases.Count > 0)
+            if (EffectiveCreateAtlas && m_FrameCanvases.Count > 0)
             {
                 CreateAtlasAndSprites();
             }
@@ -232,20 +310,28 @@ namespace Aseprite2Unity.Editor
                 }
             }
 
-            // Cleanup
+            // Cleanup canvas data (no longer needed after atlas creation)
             foreach (var canvas in m_FrameCanvases)
             {
                 canvas?.Dispose();
             }
+            m_FrameCanvases.Clear();
+            m_UniqueNameifierAnimations.Clear();
+        }
 
+        /// <summary>
+        /// 清理导入过程中的临时数据。
+        /// 在 OnImportAsset 中所有 Processor 执行完毕后调用，
+        /// 确保 Processor 能访问完整的 Sprites/AnimClips/TagSprites 等数据。
+        /// </summary>
+        private void CleanupImportData()
+        {
             m_LayerChunks.Clear();
             m_Frames.Clear();
             m_Sprites.Clear();
             m_AnimationClips.Clear();
             m_TagSprites.Clear();
-            m_FrameCanvases.Clear();
             m_AseFrameTagsChunk = null;
-            m_UniqueNameifierAnimations.Clear();
             m_GameObject = null;
         }
 
@@ -258,7 +344,7 @@ namespace Aseprite2Unity.Editor
         public void EndFrameVisit(AseFrame frame)
         {
             // Store the canvas for atlas creation later
-            if (m_CreateAtlas)
+            if (EffectiveCreateAtlas)
             {
                 m_FrameCanvases.Add(m_FrameCanvas);
                 // Don't dispose the canvas yet - we need it for atlas creation
@@ -281,7 +367,7 @@ namespace Aseprite2Unity.Editor
                 m_Context.AddObjectToAsset(textureId, texture2d);
 
                 var pivot = m_Pivot ?? new Vector2(0.5f, 0.5f);
-                var sprite = Sprite.Create(texture2d, new Rect(0, 0, CanvasWidth, CanvasHeight), pivot, m_PixelsPerUnit);
+                var sprite = Sprite.Create(texture2d, new Rect(0, 0, CanvasWidth, CanvasHeight), pivot, EffectivePixelsPerUnit);
                 m_Sprites.Add(sprite);
 
                 var spriteId = $"Sprites._{m_Sprites.Count - 1}";
@@ -292,26 +378,51 @@ namespace Aseprite2Unity.Editor
             }
         }
 
+        /// <summary>
+        /// 计算网格排列的最优列数，使图集尽量接近正方形
+        /// </summary>
+        private static (int columns, int rows) CalculateGridSize(int frameCount, int frameW, int frameH, int padding)
+        {
+            // 目标：图集宽高比尽量接近 1:1
+            // 列数 = ceil(sqrt(frameCount * frameH / frameW))
+            int bestCols = 1;
+            float bestRatio = float.MaxValue;
+            int maxCols = frameCount;
+
+            for (int cols = 1; cols <= maxCols; cols++)
+            {
+                int rows = (frameCount + cols - 1) / cols;
+                float w = cols * frameW + (cols - 1) * padding;
+                float h = rows * frameH + (rows - 1) * padding;
+                float ratio = w > h ? w / h : h / w; // 越接近1越好
+                if (ratio < bestRatio)
+                {
+                    bestRatio = ratio;
+                    bestCols = cols;
+                }
+            }
+
+            int bestRows = (frameCount + bestCols - 1) / bestCols;
+            return (bestCols, bestRows);
+        }
+
         private void CreateAtlasAndSprites()
         {
             int frameCount = m_FrameCanvases.Count;
             if (frameCount == 0) return;
 
+            // Cache effective values to avoid repeated property lookups in loops
+            int padding = EffectiveAtlasPadding;
+            float ppu = EffectivePixelsPerUnit;
+
             int atlasWidth, atlasHeight;
-            
-            // Calculate atlas dimensions based on layout
-            if (m_HorizontalLayout)
-            {
-                // Horizontal layout: frames side by side
-                atlasWidth = CanvasWidth * frameCount + m_AtlasPadding * (frameCount - 1);
-                atlasHeight = CanvasHeight;
-            }
-            else
-            {
-                // Vertical layout: frames stacked
-                atlasWidth = CanvasWidth;
-                atlasHeight = CanvasHeight * frameCount + m_AtlasPadding * (frameCount - 1);
-            }
+            int gridColumns, gridRows;
+
+            // 网格排列：自动计算最优行列数，使图集尽量接近正方形
+            (gridColumns, gridRows) = CalculateGridSize(frameCount, CanvasWidth, CanvasHeight, padding);
+
+            atlasWidth = gridColumns * CanvasWidth + (gridColumns - 1) * padding;
+            atlasHeight = gridRows * CanvasHeight + (gridRows - 1) * padding;
 
             // Create atlas texture
             Texture2D atlasTexture = new Texture2D(atlasWidth, atlasHeight, TextureFormat.RGBA32, false);
@@ -329,25 +440,15 @@ namespace Aseprite2Unity.Editor
             var assetName = Path.GetFileNameWithoutExtension(assetPath);
             var pivot = m_Pivot ?? new Vector2(0.5f, 0.5f);
 
-            // Copy each frame into the atlas
+            // Copy each frame into the atlas (网格排列：行优先，从左到右、从上到下)
             for (int frameIndex = 0; frameIndex < frameCount; frameIndex++)
             {
                 var canvas = m_FrameCanvases[frameIndex];
-                
-                int xOffset, yOffset;
-                
-                if (m_HorizontalLayout)
-                {
-                    // Horizontal: frames go left to right
-                    xOffset = frameIndex * (CanvasWidth + m_AtlasPadding);
-                    yOffset = 0;
-                }
-                else
-                {
-                    // Vertical: frames go bottom to top
-                    xOffset = 0;
-                    yOffset = frameIndex * (CanvasHeight + m_AtlasPadding);
-                }
+
+                int col = frameIndex % gridColumns;
+                int row = frameIndex / gridColumns;
+                int xOffset = col * (CanvasWidth + padding);
+                int yOffset = row * (CanvasHeight + padding);
 
                 // Copy pixels from canvas to atlas
                 unsafe
@@ -401,27 +502,15 @@ namespace Aseprite2Unity.Editor
             // Now create sprites with correct coordinates (after the texture has been flipped)
             for (int frameIndex = 0; frameIndex < frameCount; frameIndex++)
             {
-                int xOffset, yOffset;
-                
-                if (m_HorizontalLayout)
-                {
-                    // Horizontal: frames go left to right
-                    xOffset = frameIndex * (CanvasWidth + m_AtlasPadding);
-                    // After vertical flip, calculate Y from bottom
-                    yOffset = atlasHeight - CanvasHeight;
-                }
-                else
-                {
-                    // Vertical: frames stacked
-                    xOffset = 0;
-                    // After vertical flip, frames are now top to bottom, so reverse the index
-                    // Bottom frame (index 0) is now at top, top frame (last index) is now at bottom
-                    yOffset = atlasHeight - (frameIndex + 1) * CanvasHeight - frameIndex * m_AtlasPadding;
-                }
+                int col = frameIndex % gridColumns;
+                int row = frameIndex / gridColumns;
+                int xOffset = col * (CanvasWidth + padding);
+                // 翻转后 Y 坐标：row 0 在最上面 → 翻转后在最下面
+                int yOffset = atlasHeight - (row + 1) * CanvasHeight - row * padding;
 
                 // Create sprite for this frame with flipped coordinates
                 Rect spriteRect = new Rect(xOffset, yOffset, CanvasWidth, CanvasHeight);
-                var sprite = Sprite.Create(atlasTexture, spriteRect, pivot, m_PixelsPerUnit);
+                var sprite = Sprite.Create(atlasTexture, spriteRect, pivot, ppu);
                 
                 var spriteId = $"Sprites._{frameIndex}";
                 var spriteName = $"{assetName}.{spriteId}";
@@ -655,7 +744,7 @@ namespace Aseprite2Unity.Editor
 
             var clip = new AnimationClip();
             clip.name = clipName;
-            clip.frameRate = m_FrameRate;
+            clip.frameRate = EffectiveFrameRate;
             
 
             // Black magic for creating a sprite animation curve
