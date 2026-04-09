@@ -15,34 +15,29 @@ namespace Aseprite2Unity.Editor
     public class AsepriteImporter : ScriptedImporter, IAseVisitor
     {
         // Editor fields — 逐资源覆盖值
-        [Header("Override Settings")]
-        public bool m_OverridePixelsPerUnit;
+        [Header("Override Settings")] public bool m_OverridePixelsPerUnit;
         public float m_PixelsPerUnit = 16.0f;
-        
+
         public bool m_OverrideFrameRate;
         public float m_FrameRate = 60.0f;
-        
-        public GameObject m_InstantiatedPrefab;
+
         public string m_SortingLayerName;
         public int m_SortingOrder;
+
         public AnimatorCullingMode m_AnimatorCullingMode = AnimatorCullingMode.AlwaysAnimate;
         public AnimatorController m_AnimatorController;
 
-        public string m_DefaultAnimationName = "Default";
         // Atlas settings
-        [Header("Atlas Settings")]
-        public bool m_OverrideCreateAtlas;
+        [Header("Atlas Settings")] public bool m_OverrideCreateAtlas;
         public bool m_CreateAtlas = true;
-        
+
         public bool m_OverrideAtlasPadding;
         public int m_AtlasPadding = 0;
 
-        [Header("Material Settings")]
-        public bool m_OverrideMaterial;
+        [Header("Material Settings")] public bool m_OverrideMaterial;
         public Material m_DefaultMaterial;
-        
-        [Header("Animation Settings")]
-        public bool m_OverrideCreateAnimations;
+
+        [Header("Animation Settings")] public bool m_OverrideCreateAnimations;
         public bool m_CreateAnimations = true;
 
         // ================================================================
@@ -116,7 +111,7 @@ namespace Aseprite2Unity.Editor
         }
 
         // Per-Asset Processor 配置已移除，Processor 使用默认值
-        
+
         // Properties based on file header
         public int CanvasWidth => m_AseFile.Header.Width;
         public int CanvasHeight => m_AseFile.Header.Height;
@@ -178,9 +173,12 @@ namespace Aseprite2Unity.Editor
 
         private readonly UniqueNameifier m_UniqueNameifierAnimations = new UniqueNameifier();
 
-        [SerializeField]
-        private List<string> m_Errors = new List<string>();
-        public IEnumerable<string> Errors { get { return m_Errors; } }
+        [SerializeField] private List<string> m_Errors = new List<string>();
+
+        public IEnumerable<string> Errors
+        {
+            get { return m_Errors; }
+        }
 
         public override void OnImportAsset(AssetImportContext ctx)
         {
@@ -210,11 +208,13 @@ namespace Aseprite2Unity.Editor
             // Processor 全部执行完毕后再清理临时数据
             CleanupImportData();
 #else
-            string msg = string.Format("Aesprite2Unity requires Unity 2020.3 or later. You are using {0}", Application.unityVersion);
+            string msg =
+ string.Format("Aesprite2Unity requires Unity 2020.3 or later. You are using {0}", Application.unityVersion);
             m_Errors.Add(msg);
             Debug.LogError(msg);
 #endif
         }
+
 
         public void BeginFileVisit(AseFile file)
         {
@@ -222,28 +222,17 @@ namespace Aseprite2Unity.Editor
             m_Pivot = null;
             m_FrameCanvases.Clear();
 
+            // 全局配置控制是否生成默认 Prefab
+            var importConfig = AsepriteImportConfig.Find();
+            if (importConfig != null && !importConfig.GenerateDefaultPrefab)
+                return;
+
             var icon = AssetDatabaseEx.LoadFirstAssetByFilter<Texture2D>("aseprite2unity-icon-0x1badd00d");
 
-            // Use the instantatiated prefab or create a new game object we add components to
-            if (m_InstantiatedPrefab != null)
-            {
-                m_GameObject = Instantiate(m_InstantiatedPrefab);
-            }
-            else
-            {
-                m_GameObject = new GameObject();
-            }
+            m_GameObject = new GameObject();
 
             m_Context.AddObjectToAsset("_main", m_GameObject, icon);
             m_Context.SetMainObject(m_GameObject);
-
-            if (m_InstantiatedPrefab != null)
-            {
-                // We want this asset to be reimported when the prefab changes
-                var prefabPath = AssetDatabase.GetAssetPath(m_InstantiatedPrefab);
-                m_Context.DependsOnArtifact(prefabPath);
-                m_Context.DependsOnSourceAsset(prefabPath);
-            }
         }
 
         public void EndFileVisit(AseFile file)
@@ -256,65 +245,73 @@ namespace Aseprite2Unity.Editor
 
             BuildAnimations();
 
-            // Add a sprite renderer if needed and assign our sprite to it
-            var renderer = m_GameObject.GetComponent<SpriteRenderer>();
-            if (renderer == null)
-            {
-                renderer = m_GameObject.AddComponent<SpriteRenderer>();
-                renderer.sortingLayerName = m_SortingLayerName;
-                renderer.sortingOrder = m_SortingOrder;
-            }
 
-            if (m_Sprites.Count > 0)
-            {
-                renderer.sprite = m_Sprites[0];
-            }
+            // 检查全局配置是否跳过默认 Prefab 创建
 
-            // Add an animator if needed
-            var animator = m_GameObject.GetComponent<Animator>();
-            if (animator == null)
+            if (m_GameObject)
             {
-                animator = m_GameObject.AddComponent<Animator>();
-                animator.cullingMode = m_AnimatorCullingMode;
-
-                // Make a default animator controller if needed
-                if (m_AnimatorController == null)
+                // Add a sprite renderer if needed and assign our sprite to it
+                var renderer = m_GameObject.GetComponent<SpriteRenderer>();
+                if (renderer == null)
                 {
-                    var controller = new AnimatorController();
-                    controller.name = Path.GetFileNameWithoutExtension(assetPath);
-                    controller.AddLayer("Base Layer");
+                    renderer = m_GameObject.AddComponent<SpriteRenderer>();
+                    renderer.sortingLayerName = m_SortingLayerName;
+                    renderer.sortingOrder = m_SortingOrder;
+                }
 
-                    foreach (var clip in m_AnimationClips)
+                if (m_Sprites.Count > 0)
+                {
+                    renderer.sprite = m_Sprites[0];
+                }
+
+                // Add an animator if needed
+                var animator = m_GameObject.GetComponent<Animator>();
+                if (animator == null)
+                {
+                    animator = m_GameObject.AddComponent<Animator>();
+                    animator.cullingMode = m_AnimatorCullingMode;
+
+                    // Make a default animator controller if needed
+                    if (m_AnimatorController == null)
                     {
-                        controller.AddMotion(clip);
-                    }
+                        var controller = new AnimatorController();
+                        controller.name = Path.GetFileNameWithoutExtension(assetPath);
+                        controller.AddLayer("Base Layer");
 
-                    m_Context.AddObjectToAsset(controller.name + "_Controller", controller);
-                    
-                    foreach (var layer in controller.layers)
-                    {
-                        var stateMachine = layer.stateMachine;
-                        m_Context.AddObjectToAsset(stateMachine.name + "_StateMachine", stateMachine);
-
-                        foreach (var state in stateMachine.states)
+                        foreach (var clip in m_AnimationClips)
                         {
-                            m_Context.AddObjectToAsset(state.state.name + "_State", state.state);
+                            controller.AddMotion(clip);
                         }
-                    }
 
-                    AnimatorController.SetAnimatorController(animator, controller);
-                }
-                else
-                {
-                    AnimatorController.SetAnimatorController(animator, m_AnimatorController);
+                        m_Context.AddObjectToAsset(controller.name + "_Controller", controller);
+
+                        foreach (var layer in controller.layers)
+                        {
+                            var stateMachine = layer.stateMachine;
+                            m_Context.AddObjectToAsset(stateMachine.name + "_StateMachine", stateMachine);
+
+                            foreach (var state in stateMachine.states)
+                            {
+                                m_Context.AddObjectToAsset(state.state.name + "_State", state.state);
+                            }
+                        }
+
+                        AnimatorController.SetAnimatorController(animator, controller);
+                    }
+                    else
+                    {
+                        AnimatorController.SetAnimatorController(animator, m_AnimatorController);
+                    }
                 }
             }
+
 
             // Cleanup canvas data (no longer needed after atlas creation)
             foreach (var canvas in m_FrameCanvases)
             {
                 canvas?.Dispose();
             }
+
             m_FrameCanvases.Clear();
             m_UniqueNameifierAnimations.Clear();
         }
@@ -367,7 +364,8 @@ namespace Aseprite2Unity.Editor
                 m_Context.AddObjectToAsset(textureId, texture2d);
 
                 var pivot = m_Pivot ?? new Vector2(0.5f, 0.5f);
-                var sprite = Sprite.Create(texture2d, new Rect(0, 0, CanvasWidth, CanvasHeight), pivot, EffectivePixelsPerUnit);
+                var sprite = Sprite.Create(texture2d, new Rect(0, 0, CanvasWidth, CanvasHeight), pivot,
+                    EffectivePixelsPerUnit);
                 m_Sprites.Add(sprite);
 
                 var spriteId = $"Sprites._{m_Sprites.Count - 1}";
@@ -428,13 +426,14 @@ namespace Aseprite2Unity.Editor
             Texture2D atlasTexture = new Texture2D(atlasWidth, atlasHeight, TextureFormat.RGBA32, false);
             atlasTexture.filterMode = FilterMode.Point;
             atlasTexture.wrapMode = TextureWrapMode.Clamp;
-            
+
             // Fill with transparent pixels
             Color32[] clearPixels = new Color32[atlasWidth * atlasHeight];
             for (int i = 0; i < clearPixels.Length; i++)
             {
                 clearPixels[i] = Color.clear;
             }
+
             atlasTexture.SetPixels32(clearPixels);
 
             var assetName = Path.GetFileNameWithoutExtension(assetPath);
@@ -455,19 +454,19 @@ namespace Aseprite2Unity.Editor
                 {
                     var canvasPixels = (Color32*)canvas.Pixels.GetUnsafePtr();
                     int canvasPixelCount = canvas.Pixels.Length;
-                    
+
                     for (int y = 0; y < CanvasHeight; y++)
                     {
                         for (int x = 0; x < CanvasWidth; x++)
                         {
                             int canvasIndex = y * CanvasWidth + x;
-                            
+
                             // 边界检查：确保不越界访问canvas数组
                             if (canvasIndex >= 0 && canvasIndex < canvasPixelCount)
                             {
                                 int atlasX = xOffset + x;
                                 int atlasY = yOffset + y;
-                                
+
                                 if (atlasX >= 0 && atlasX < atlasWidth && atlasY >= 0 && atlasY < atlasHeight)
                                 {
                                     atlasTexture.SetPixel(atlasX, atlasY, canvasPixels[canvasIndex]);
@@ -480,7 +479,7 @@ namespace Aseprite2Unity.Editor
 
             // Apply pixel data
             atlasTexture.Apply();
-            
+
             // Flip the atlas texture to match Unity's coordinate system (bottom-left origin)
             // This is the same as what AseCanvas.ToTexture2D() does
             var renderTexture = new RenderTexture(atlasWidth, atlasHeight, 0, RenderTextureFormat.ARGB32, 0);
@@ -494,7 +493,7 @@ namespace Aseprite2Unity.Editor
                 atlasTexture.Apply();
             }
             RenderTexture.active = oldRenderTexture;
-            
+
             var atlasName = $"{assetName}_Atlas";
             atlasTexture.name = atlasName;
             m_Context.AddObjectToAsset("Atlas", atlasTexture);
@@ -511,11 +510,11 @@ namespace Aseprite2Unity.Editor
                 // Create sprite for this frame with flipped coordinates
                 Rect spriteRect = new Rect(xOffset, yOffset, CanvasWidth, CanvasHeight);
                 var sprite = Sprite.Create(atlasTexture, spriteRect, pivot, ppu);
-                
+
                 var spriteId = $"Sprites._{frameIndex}";
                 var spriteName = $"{assetName}.{spriteId}";
                 sprite.name = spriteName;
-                
+
                 m_Sprites.Add(sprite);
                 m_Context.AddObjectToAsset(spriteId, sprite);
             }
@@ -557,17 +556,18 @@ namespace Aseprite2Unity.Editor
                             {
                                 int cx = cel.PositionX + x;
                                 int cy = cel.PositionY + y;
-                                
+
                                 // 边界检查：确保cx和cy在canvas范围内
                                 if (cx >= 0 && cx < canvas.Width && cy >= 0 && cy < canvas.Height)
                                 {
                                     int index = cx + (cy * canvas.Width);
-                                    
+
                                     // 双重保险：检查计算出的索引是否有效
                                     if (index >= 0 && index < canvasPixelCount)
                                     {
                                         Color32 basePixel = canvasPixels[index];
-                                        Color32 blendedPixel = AseGraphics.BlendColors(layer.BlendMode, basePixel, celPixel);
+                                        Color32 blendedPixel =
+                                            AseGraphics.BlendColors(layer.BlendMode, basePixel, celPixel);
                                         canvasPixels[index] = blendedPixel;
                                     }
                                 }
@@ -620,16 +620,18 @@ namespace Aseprite2Unity.Editor
                                         if (cx >= 0 && cx < canvas.Width && cy >= 0 && cy < canvas.Height)
                                         {
                                             Color32 tilePixel = AseGraphics.GetPixel(tx, ty, m_GetPixelArgs);
-                                            tilePixel.a = AseGraphics.CalculateOpacity(tilePixel.a, layer.Opacity, cel.Opacity);
+                                            tilePixel.a = AseGraphics.CalculateOpacity(tilePixel.a, layer.Opacity,
+                                                cel.Opacity);
                                             if (tilePixel.a > 0)
                                             {
                                                 int canvasPixelIndex = cx + (cy * canvas.Width);
-                                                
+
                                                 // 双重保险：检查计算出的索引是否有效
                                                 if (canvasPixelIndex >= 0 && canvasPixelIndex < canvasPixelCount)
                                                 {
                                                     Color32 basePixel = canvasPixels[canvasPixelIndex];
-                                                    Color32 blendedPixel = AseGraphics.BlendColors(layer.BlendMode, basePixel, tilePixel);
+                                                    Color32 blendedPixel = AseGraphics.BlendColors(layer.BlendMode,
+                                                        basePixel, tilePixel);
                                                     canvasPixels[canvasPixelIndex] = blendedPixel;
                                                 }
                                             }
@@ -721,6 +723,7 @@ namespace Aseprite2Unity.Editor
                         if (idx >= 0 && idx < m_Sprites.Count)
                             tagSpriteList.Add(m_Sprites[idx]);
                     }
+
                     m_TagSprites[entry.Name] = tagSpriteList;
 
                     // Remove the indices from the pool of animation frames
@@ -745,7 +748,7 @@ namespace Aseprite2Unity.Editor
             var clip = new AnimationClip();
             clip.name = clipName;
             clip.frameRate = EffectiveFrameRate;
-            
+
 
             // Black magic for creating a sprite animation curve
             // from: https://answers.unity.com/questions/1080430/create-animation-clip-from-sprites-programmaticall.html

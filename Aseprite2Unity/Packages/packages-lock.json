@@ -1,7 +1,7 @@
 {
   "dependencies": {
-    "com.seanba.aseprite2unity": {
-      "version": "file:com.seanba.aseprite2unity",
+    "com.isakwong.aseprite2unity-ext": {
+      "version": "file:com.isakwong.aseprite2unity",
       "depth": 0,
       "source": "embedded",
       "dependencies": {
