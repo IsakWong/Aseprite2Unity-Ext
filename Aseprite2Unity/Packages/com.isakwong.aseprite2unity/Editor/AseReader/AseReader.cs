@@ -14,6 +14,16 @@ namespace Aseprite2Unity.Editor
 
         public AseChunk LastChunk { get; set; }
 
+        /// <summary>
+        /// 当前正在等待 UserData 分发的 FrameTagsChunk（Aseprite 格式中 FrameTags 后跟 N 个 UserData）
+        /// </summary>
+        internal AseFrameTagsChunk PendingFrameTagsChunk { get; set; }
+
+        /// <summary>
+        /// 下一个待分发 UserData 的 FrameTag Entry 索引
+        /// </summary>
+        internal int PendingFrameTagIndex { get; set; }
+
         public AseReader(string asePath)
         {
             m_BinaryReader = new BinaryReader(File.Open(asePath, FileMode.Open));

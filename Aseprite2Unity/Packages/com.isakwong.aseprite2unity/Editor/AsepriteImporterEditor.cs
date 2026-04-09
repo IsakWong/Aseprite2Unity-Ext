@@ -8,7 +8,8 @@ using UnityEngine;
 
 namespace Aseprite2Unity.Editor
 {
-    [CustomEditor(typeof(AsepriteImporter))]
+    #if false
+    [CustomEditor(typeof(AsepriteImporter), true)]
     [CanEditMultipleObjects]
     public class AsepriteImporterEditor : ScriptedImporterEditor
     {
@@ -20,12 +21,7 @@ namespace Aseprite2Unity.Editor
 
             var importer = serializedObject.targetObject as AsepriteImporter;
 
-            // 同步 Processor Settings 列表，然后刷新 serializedObject
-            if (importer != null)
-            {
-                AsepriteProcessorRegistry.EnsureSettings(importer);
-                serializedObject.Update();
-            }
+            // Processor 不再使用 Per-Asset Settings
 
             if (importer != null && importer.Errors.Any())
             {
@@ -103,7 +99,7 @@ namespace Aseprite2Unity.Editor
 
 
             // Draw processor settings
-            DrawProcessorSettings();
+            // DrawProcessorSettings(); // Per-Asset Settings 已移除
 
             // 全局配置快捷入口
             DrawGlobalConfigSection();
@@ -171,47 +167,7 @@ namespace Aseprite2Unity.Editor
             }
         }
 
-        private void DrawProcessorSettings()
-        {
-            var listProp = serializedObject.FindProperty(nameof(AsepriteImporter.m_ProcessorSettings));
-            if (listProp == null || !listProp.isArray || listProp.arraySize == 0) return;
-
-            EditorGUILayout.Space();
-            EditorGUILayout.LabelField("Processor Settings", EditorStyles.boldLabel);
-
-            for (int i = 0; i < listProp.arraySize; i++)
-            {
-                var elementProp = listProp.GetArrayElementAtIndex(i);
-                if (elementProp == null) continue;
-                if (elementProp.propertyType != SerializedPropertyType.ManagedReference) continue;
-
-                // 获取 Settings 实例以读取 DisplayName
-                var importer = serializedObject.targetObject as AsepriteImporter;
-                AsepriteProcessorSettings settings = null;
-                if (importer != null && i < importer.m_ProcessorSettings.Count)
-                    settings = importer.m_ProcessorSettings[i];
-
-                string label = settings?.DisplayName ?? elementProp.managedReferenceFullTypename;
-
-                EditorGUILayout.Space(4);
-                EditorGUILayout.LabelField(label, EditorStyles.boldLabel);
-                EditorGUI.indentLevel++;
-
-                // 绘制所有可见子属性
-                var childProp = elementProp.Copy();
-                var endProp = elementProp.GetEndProperty();
-                bool enterChildren = true;
-
-                while (childProp.NextVisible(enterChildren) &&
-                       !SerializedProperty.EqualContents(childProp, endProp))
-                {
-                    enterChildren = false;
-                    EditorGUILayout.PropertyField(childProp, true);
-                }
-
-                EditorGUI.indentLevel--;
-            }
-        }
+        // Per-Asset Processor Settings 已移除，Inspector 不再绘制
 
         private void DrawGlobalConfigSection()
         {
@@ -310,4 +266,5 @@ namespace Aseprite2Unity.Editor
             EditorGUI.EndProperty();
         }
     }
+#endif
 }

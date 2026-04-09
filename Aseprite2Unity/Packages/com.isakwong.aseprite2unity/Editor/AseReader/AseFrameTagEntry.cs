@@ -10,6 +10,16 @@
         public bool IsOneShot { get; }
         public byte Loop { get; }
 
+        /// <summary>
+        /// Aseprite UserData 文本（FrameTags 后跟随的 UserData Chunk 按顺序分配到各 Entry）
+        /// </summary>
+        public string UserDataText { get; set; }
+
+        /// <summary>
+        /// Aseprite UserData 颜色 RGBA（FrameTags 后跟随的 UserData Chunk 按顺序分配到各 Entry）
+        /// </summary>
+        public byte[] UserDataColor { get; set; }
+
         public AseFrameTagEntry(AseReader reader)
         {
             FromFrame = reader.ReadWORD();

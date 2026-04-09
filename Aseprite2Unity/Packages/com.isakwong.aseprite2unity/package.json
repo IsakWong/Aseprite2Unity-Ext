@@ -1,6 +1,6 @@
 {
   "name": "com.isakwong.aseprite2unity-ext",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "displayName": "Aseprite2Unity-Ext",
   "description": "Extended Aseprite importer for Unity with sprite atlas support and extensible import pipeline. Based on Aseprite2Unity by Sean Barton.",
   "unity": "2020.3",
