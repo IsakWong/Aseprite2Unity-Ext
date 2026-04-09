@@ -65,9 +65,6 @@ namespace Aseprite2Unity.Editor
                 EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(AsepriteImporter.m_PixelsPerUnit)),
                     new GUIContent("Pixels Per Unit"));
 
-                EditorGUILayout.PropertyField(serializedObject.FindProperty(nameof(AsepriteImporter.m_InstantiatedPrefab)),
-                    new GUIContent("Instantiated Prefab"));
-
                 DisplayStringChoiceProperty(serializedObject.FindProperty(nameof(AsepriteImporter.m_SortingLayerName)),
                     SortingLayer.layers.Select(l => l.name).ToArray(),
                     new GUIContent("Sorting Layer"));

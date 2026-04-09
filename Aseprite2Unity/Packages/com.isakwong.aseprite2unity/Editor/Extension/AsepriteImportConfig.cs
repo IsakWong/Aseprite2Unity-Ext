@@ -45,6 +45,12 @@ namespace Aseprite2Unity.Editor
         [Tooltip("默认是否创建 AnimationClip")]
         public bool DefaultCreateAnimations = true;
 
+        // ---- Prefab 生成 ----
+
+        [Header("Prefab 生成")]
+        [Tooltip("为 true 时基础导入器生成默认空 GameObject 作为 _main；为 false 时由 Processor 使用基础预制体模板创建")]
+        public bool GenerateDefaultPrefab = true;
+
         // ================================================================
         //  单例查找
         // ================================================================
