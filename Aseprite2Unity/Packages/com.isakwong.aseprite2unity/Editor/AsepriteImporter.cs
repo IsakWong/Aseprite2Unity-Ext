@@ -222,17 +222,32 @@ namespace Aseprite2Unity.Editor
             m_Pivot = null;
             m_FrameCanvases.Clear();
 
-            // 全局配置控制是否生成默认 Prefab
-            var importConfig = AsepriteImportConfig.Find();
-            if (importConfig != null && !importConfig.GenerateDefaultPrefab)
-                return;
-
+            // 始终在导入开始注册 _main 根节点，保证主资源 LocalIdentifier 稳定；
+            // Processor（如环境）只在此基础上 AddComponent / 挂子物体，不再 late AddObjectToAsset 顶替主物体。
+            // （AsepriteImportConfig.GenerateDefaultPrefab 保留字段兼容旧资源，此处不再读取。）
             var icon = AssetDatabaseEx.LoadFirstAssetByFilter<Texture2D>("aseprite2unity-icon-0x1badd00d");
 
-            m_GameObject = new GameObject();
+            m_GameObject = CreateImportedGameObject();
 
             m_Context.AddObjectToAsset("_main", m_GameObject, icon);
             m_Context.SetMainObject(m_GameObject);
+        }
+
+        /// <summary>
+        /// 创建导入主 GameObject。
+        /// 优先交由扩展层 Processor 处理，未处理时回退到 Importer 自身默认实现。
+        /// </summary>
+        protected virtual GameObject CreateImportedGameObject()
+        {
+            return AsepriteProcessorRegistry.TryCreateImportedGameObject(m_Context, this) ?? CreateFallbackImportedGameObject();
+        }
+
+        /// <summary>
+        /// 默认兜底实现。业务层也可以通过覆写此方法调整最终回退行为。
+        /// </summary>
+        protected virtual GameObject CreateFallbackImportedGameObject()
+        {
+            return new GameObject();
         }
 
         public void EndFileVisit(AseFile file)
@@ -245,8 +260,6 @@ namespace Aseprite2Unity.Editor
 
             BuildAnimations();
 
-
-            // 检查全局配置是否跳过默认 Prefab 创建
 
             if (m_GameObject)
             {

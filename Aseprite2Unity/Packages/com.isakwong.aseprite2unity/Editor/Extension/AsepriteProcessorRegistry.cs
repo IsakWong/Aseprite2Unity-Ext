@@ -74,6 +74,36 @@ namespace Aseprite2Unity.Editor
         // ================================================================
 
         /// <summary>
+        /// 按 Processor 顺序尝试创建导入主 GameObject。
+        /// 返回 null 表示没有 Processor 接管，由 Importer 自身兜底。
+        /// </summary>
+        public static GameObject TryCreateImportedGameObject(AssetImportContext ctx, AsepriteImporter importer)
+        {
+            if (!s_Initialized) Initialize();
+            if (s_Processors == null || s_Processors.Count == 0) return null;
+
+            foreach (var processor in s_Processors)
+            {
+                try
+                {
+                    var gameObject = processor.TryCreateImportedGameObject(ctx, importer);
+                    if (gameObject != null)
+                        return gameObject;
+                }
+                catch (Exception e)
+                {
+                    try { processor.OnCreateGameObjectError(ctx, importer, e); }
+                    catch (Exception ee)
+                    {
+                        Debug.LogError($"[AsepriteProcessorRegistry] {processor.GetType().Name} 前置创建错误处理器异常: {ee.Message}");
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
         /// 执行所有已注册的 Processor。
         /// Processor 使用各自的默认 Settings（无 Per-Asset 配置）。
         /// </summary>

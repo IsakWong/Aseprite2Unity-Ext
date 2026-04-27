@@ -48,7 +48,7 @@ namespace Aseprite2Unity.Editor
         // ---- Prefab 生成 ----
 
         [Header("Prefab 生成")]
-        [Tooltip("为 true 时基础导入器生成默认空 GameObject 作为 _main；为 false 时由 Processor 使用基础预制体模板创建")]
+        [Tooltip("已废弃：导入器将始终创建 _main 根 GameObject。保留该字段仅为兼容旧序列化数据。")]
         public bool GenerateDefaultPrefab = true;
 
         // ================================================================

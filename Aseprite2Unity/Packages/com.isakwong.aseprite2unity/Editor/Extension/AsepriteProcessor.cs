@@ -12,9 +12,10 @@ namespace Aseprite2Unity.Editor
     /// 1. AsepriteProcessor&lt;TSettings&gt; —— 需要 Per-Asset 配置的处理器（推荐）
     /// 2. AsepriteProcessor —— 无需配置的轻量处理器
     ///
-    /// 处理器支持两种互补的处理模式：
-    /// 1. 重写 OnImportAseprite() —— 基于导入结果（Sprites、Clips 等）
-    /// 2. 重写 Visit*() 方法 —— Visitor 模式遍历原始 Aseprite 数据
+    /// 处理器支持三种互补的处理模式：
+    /// 1. 重写 TryCreateImportedGameObject() —— 在导入早期参与主 GameObject 创建
+    /// 2. 重写 OnImportAseprite() —— 基于导入结果（Sprites、Clips 等）
+    /// 3. 重写 Visit*() 方法 —— Visitor 模式遍历原始 Aseprite 数据
     ///
     /// 执行顺序：OnImportAseprite() 先于 Visit*() 遍历。
     /// </summary>
@@ -31,6 +32,15 @@ namespace Aseprite2Unity.Editor
 
         /// <summary>是否需要 Visitor 模式遍历 AseFile Chunks</summary>
         public virtual bool NeedVisitChunks => false;
+
+        /// <summary>
+        /// 在导入早期尝试创建主 GameObject。
+        /// 返回 null 表示跳过，交由后续 Processor 或 Importer 自身兜底。
+        /// </summary>
+        public virtual GameObject TryCreateImportedGameObject(AssetImportContext ctx, AsepriteImporter importer)
+        {
+            return null;
+        }
 
         /// <summary>
         /// 导入时调用。重写此方法添加自定义处理逻辑。
@@ -51,6 +61,14 @@ namespace Aseprite2Unity.Editor
         public virtual void OnProcessError(AssetImportContext ctx, AsepriteImporter importer, AsepriteImportResult result, Exception exception)
         {
             Debug.LogError($"[{GetType().Name}] Error processing {ctx.assetPath}: {exception.Message}\n{exception.StackTrace}");
+        }
+
+        /// <summary>
+        /// 前置创建主 GameObject 失败时的回调。
+        /// </summary>
+        public virtual void OnCreateGameObjectError(AssetImportContext ctx, AsepriteImporter importer, Exception exception)
+        {
+            Debug.LogError($"[{GetType().Name}] Error creating root GameObject for {ctx.assetPath}: {exception.Message}\n{exception.StackTrace}");
         }
 
         /// <summary>获取全局导入配置（可能为 null）</summary>
