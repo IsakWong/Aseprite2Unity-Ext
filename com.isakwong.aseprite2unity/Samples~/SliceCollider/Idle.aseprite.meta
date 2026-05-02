@@ -1,0 +1,34 @@
+fileFormatVersion: 2
+guid: f47b0884ba0446c48aa8b4138223ca53
+importerOverride:
+  nativeImporterType: 2089858483
+  scriptedImporterType:
+    serializedVersion: 2
+    Hash: d488def8f475e9e294c1a548ecc42c44
+ScriptedImporter:
+  internalIDToNameTable: []
+  externalObjects: {}
+  serializedVersion: 2
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+  script: {fileID: 11500000, guid: 7e6638f39d58ef54c81d50a1c70a873f, type: 3}
+  overridePixelsPerUnit: 0
+  pixelsPerUnit: 16
+  overrideFrameRate: 0
+  frameRate: 60
+  sortingLayerName: 
+  sortingOrder: 0
+  animatorCullingMode: 0
+  animatorController: {instanceID: 0}
+  overrideCreateAtlas: 0
+  createAtlas: 1
+  overrideAtlasPadding: 0
+  atlasPadding: 0
+  overrideMaterial: 0
+  defaultMaterial: {instanceID: 0}
+  overrideCreateAnimations: 0
+  createAnimations: 1
+  errors: []
+  createColliders: 1
+  isTrigger: 0
