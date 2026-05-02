@@ -1,6 +1,6 @@
 # Aseprite2Unity-Ext
 
-> **版本 1.2.0** &nbsp;|&nbsp; **Unity 2020.3+** &nbsp;|&nbsp; **MIT License**
+> **版本 2.0.0** &nbsp;|&nbsp; **Unity 2020.3+** &nbsp;|&nbsp; **MIT License**
 
 [![GitHub](https://img.shields.io/badge/GitHub-IsakWong%2FAseprite2Unity--Ext-blue?logo=github)](https://github.com/IsakWong/Aseprite2Unity-Ext)
 
@@ -39,7 +39,7 @@
 ```json
 {
   "dependencies": {
-    "com.isakwong.aseprite2unity-ext": "https://github.com/IsakWong/Aseprite2Unity-Ext.git?path=/Aseprite2Unity/Packages/com.isakwong.aseprite2unity"
+    "com.isakwong.aseprite2unity-ext": "https://github.com/IsakWong/Aseprite2Unity-Ext.git"
   }
 }
 ```
@@ -47,7 +47,7 @@
 如果需要锁定版本，可以在 URL 末尾追加版本标签：
 
 ```
-"com.isakwong.aseprite2unity-ext": "https://github.com/IsakWong/Aseprite2Unity-Ext.git?path=/Aseprite2Unity/Packages/com.isakwong.aseprite2unity#v1.2.0"
+"com.isakwong.aseprite2unity-ext": "https://github.com/IsakWong/Aseprite2Unity-Ext.git#v2.0.0"
 ```
 
 ### 方式二：本地文件引用（适合开发调试）
@@ -57,7 +57,7 @@
 ```json
 {
   "dependencies": {
-    "com.isakwong.aseprite2unity-ext": "file:../Aseprite2Unity-Ext/Aseprite2Unity/Packages/com.isakwong.aseprite2unity"
+    "com.isakwong.aseprite2unity-ext": "file:../Aseprite2Unity-Ext/com.isakwong.aseprite2unity"
   }
 }
 ```
@@ -107,7 +107,7 @@ OpenUPM 源尚在准备中，后续版本将提供支持。
 
 ### 3. 全局配置与逐资源覆盖（Global Config + Override）
 
-> **1.2.0 新增**
+> **2.0.0 新增**
 
 引入三级配置解析机制，按优先级从高到低依次为：
 
@@ -135,7 +135,7 @@ Material mat = importer.EffectiveMaterial;
 
 ### 4. Welcome Window 与 Project Settings 面板
 
-> **1.2.0 新增**
+> **2.0.0 新增**
 
 #### Welcome Window
 

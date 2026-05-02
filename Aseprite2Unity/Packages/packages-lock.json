@@ -1,9 +1,9 @@
 {
   "dependencies": {
     "com.isakwong.aseprite2unity-ext": {
-      "version": "file:com.isakwong.aseprite2unity",
+      "version": "file:../../com.isakwong.aseprite2unity",
       "depth": 0,
-      "source": "embedded",
+      "source": "local",
       "dependencies": {
         "com.unity.burst": "1.0.0"
       }

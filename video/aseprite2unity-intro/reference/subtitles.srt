@@ -1,0 +1,53 @@
+1
+00:00:01,000 --> 00:00:05,500
+Aseprite2Unity-Ext
+将 Aseprite 像素动画无缝导入 Unity 的编辑器插件
+v2.0.0 · MIT License · 开源免费
+
+2
+00:00:07,000 --> 00:00:15,000
+这是一个DEMO，扩展了Aseprite自动生成精灵的阴影
+在 Aseprite 中划定阴影区域
+导入 Unity 自动生成阴影 Sprite
+
+3
+00:00:16,500 --> 00:00:23,000
+Aseprite → Unity 工作流痛点
+手动导出每一帧图片
+逐个创建 Sprite
+手动拼 Animation Clip 和 Animator Controller
+
+4
+00:00:24,500 --> 00:00:33,000
+拖入 .aseprite → 自动生成所有资源
+20+ 图层混合模式 · Burst 编译加速
+生成物：Sprite / AnimationClip / AnimatorController / Prefab
+
+5
+00:00:34,500 --> 00:00:41,000
+Sprite Atlas：多帧合并为单张纹理
+自动计算最优行列布局
+减少 Draw Call，提升渲染性能
+
+6
+00:00:42,500 --> 00:00:53,000
+可扩展的处理器管线 Processor Pipeline
+反射自动发现 → 排序 → 顺序执行
+无需修改包源码即可扩展功能
+
+7
+00:00:54,500 --> 00:00:65,000
+Visitor 模式访问原始 Aseprite 数据
+三层配置：全局 ScriptableObject → 单文件 Override → 硬编码兜底
+
+8
+00:00:66,500 --> 00:00:75,000
+实战：SliceCollider 示例
+Aseprite 切片 → Unity BoxCollider2D
+完整的自定义 Importer 覆写模式
+
+9
+00:00:76,000 --> 00:00:81,000
+开始使用 Aseprite2Unity-Ext
+github.com/isakwong/Aseprite2Unity-Ext
+MIT License · Unity 2020.3+ · 开源免费 · 持续更新
