@@ -1,0 +1,21 @@
+{
+    "name": "com.isakwong.aseprite2unity.Samples.SliceCollider.Editor",
+    "rootNamespace": "Aseprite2Unity.Samples.SliceCollider",
+    "references": [
+        "GUID:2665a8d13d1b3f18800f46e256720795",
+        "com.isakwong.aseprite2unity.Editor"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [
+        "UNITY_2020_3_OR_NEWER"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

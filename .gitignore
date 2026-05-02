@@ -42,6 +42,10 @@ Aseprite2Unity/Logs/Packages-Update.log
 deploy/output.log
 docs/_build
 
+# Imported samples are copies of Samples~/
+Aseprite2Unity/Assets/Samples/
+Aseprite2Unity/Assets/Samples.meta
+
 # Test data
 Aseprite2Unity/Assets/TestData/
 Aseprite2Unity/Assets/TestData.meta

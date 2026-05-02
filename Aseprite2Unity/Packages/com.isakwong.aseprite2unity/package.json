@@ -20,9 +20,14 @@
   },
   "samples": [
     {
-      "displayName": "MegaDad",
-      "description": "Simple MegaDad animated sprite. Supports idle, running, climbing, and jumping animations",
-      "path": "Samples~/MegaDad"
+      "displayName": "Basic",
+      "description": "最小示例：使用默认 AsepriteImporter 导入 Idle.aseprite，演示 Sprite / Animation 自动切片。",
+      "path": "Samples~/Basic"
+    },
+    {
+      "displayName": "Slice Collider",
+      "description": "Override Importer 示例：把 Aseprite 中以 'unity:collider' 开头的 slice 自动转换成 BoxCollider2D。包含示例资源 Idle.aseprite。",
+      "path": "Samples~/SliceCollider"
     }
   ]
 }

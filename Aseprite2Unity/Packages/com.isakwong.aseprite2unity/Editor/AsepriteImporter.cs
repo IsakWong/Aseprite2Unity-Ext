@@ -10,8 +10,17 @@ using UnityEngine;
 
 namespace Aseprite2Unity.Editor
 {
-    // [ScriptedImporter] 特性已移至业务层子类 JasaAsepriteImporter
-    // 保留为可继承基类，不直接注册扩展名
+    // 默认 importer：注册 .ase / .aseprite 扩展名。
+    //
+    // 想用业务层子类替代默认导入器？
+    // 1. 子类用 overrideExts 注册，例如：
+    //        [ScriptedImporter(1, null, new[] { "ase", "aseprite" })]
+    //        public class MyAsepriteImporter : AsepriteImporter { ... }
+    //    overrideExts 不会争夺扩展名，仅把子类登记为可选 importer。
+    // 2. 通过 Tools → Aseprite2Unity → Select Importer... 选择目标子类
+    //    并 Apply To All，可批量把项目内 .ase / .aseprite 切换到子类导入。
+    //    单个资源也可在 Inspector 顶部的 "Importer" 下拉就地切换。
+    [ScriptedImporter(1, null, new[] { "ase", "aseprite" })]
     public class AsepriteImporter : ScriptedImporter, IAseVisitor
     {
         // Editor fields — 逐资源覆盖值
@@ -157,10 +166,17 @@ namespace Aseprite2Unity.Editor
         /// <summary>导入生成的主 GameObject</summary>
         public GameObject ImportedGameObject => m_GameObject;
 
+        /// <summary>
+        /// 已解析的 sprite pivot（normalized，Y 轴向上；未在 Aseprite 中显式指定 unity:pivot 时为 null）。
+        /// 可供子类在 EndFileVisit 等阶段复用，避免重复计算。
+        /// </summary>
+        public Vector2? ResolvedPivot => m_Pivot;
+
         // Atlas data - store frame canvases temporarily
         private readonly List<AseCanvas> m_FrameCanvases = new List<AseCanvas>();
 
         private GameObject m_GameObject;
+        private bool m_GameObjectCreatedByProcessor;
 
         private AssetImportContext m_Context;
         private AseFile m_AseFile;
@@ -216,7 +232,7 @@ namespace Aseprite2Unity.Editor
         }
 
 
-        public void BeginFileVisit(AseFile file)
+        public virtual void BeginFileVisit(AseFile file)
         {
             m_GetPixelArgs.ColorDepth = ColorDepth;
             m_Pivot = null;
@@ -239,7 +255,13 @@ namespace Aseprite2Unity.Editor
         /// </summary>
         protected virtual GameObject CreateImportedGameObject()
         {
-            return AsepriteProcessorRegistry.TryCreateImportedGameObject(m_Context, this) ?? CreateFallbackImportedGameObject();
+            var go = AsepriteProcessorRegistry.TryCreateImportedGameObject(m_Context, this);
+            if (go != null)
+            {
+                m_GameObjectCreatedByProcessor = true;
+                return go;
+            }
+            return CreateFallbackImportedGameObject();
         }
 
         /// <summary>
@@ -250,7 +272,7 @@ namespace Aseprite2Unity.Editor
             return new GameObject();
         }
 
-        public void EndFileVisit(AseFile file)
+        public virtual void EndFileVisit(AseFile file)
         {
             // Create atlas texture from all frames
             if (EffectiveCreateAtlas && m_FrameCanvases.Count > 0)
@@ -261,7 +283,7 @@ namespace Aseprite2Unity.Editor
             BuildAnimations();
 
 
-            if (m_GameObject)
+            if (m_GameObject && !m_GameObjectCreatedByProcessor)
             {
                 // Add a sprite renderer if needed and assign our sprite to it
                 var renderer = m_GameObject.GetComponent<SpriteRenderer>();
@@ -690,7 +712,7 @@ namespace Aseprite2Unity.Editor
             m_GetPixelArgs.Palette[TransparentIndex] = Color.clear;
         }
 
-        public void VisitSliceChunk(AseSliceChunk slice)
+        public virtual void VisitSliceChunk(AseSliceChunk slice)
         {
             if (string.Equals("unity:pivot", slice.Name, StringComparison.OrdinalIgnoreCase))
             {
@@ -755,8 +777,8 @@ namespace Aseprite2Unity.Editor
         {
             animationName = m_UniqueNameifierAnimations.MakeUniqueName(animationName);
             var assetName = Path.GetFileNameWithoutExtension(assetPath);
-            var clipName = $"{assetName}.Clip.{animationName}";
-            var clipId = $"Clip.{animationName}";
+            var clipName = $"{animationName}";
+            var clipId = $"Clip_{animationName}";
 
             var clip = new AnimationClip();
             clip.name = clipName;
