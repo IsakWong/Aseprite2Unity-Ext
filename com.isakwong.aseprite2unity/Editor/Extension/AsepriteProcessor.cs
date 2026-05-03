@@ -50,7 +50,7 @@ namespace Aseprite2Unity.Editor
         /// <summary>
         /// 在 OnImportAseprite 前调用，返回 false 跳过此处理器。
         /// </summary>
-        public virtual bool ShouldProcess(AssetImportContext ctx, AsepriteImporter importer, AsepriteImportResult result)
+        public virtual bool ShouldProcess(AssetImportContext ctx, AsepriteImporter importer)
         {
             return true;
         }

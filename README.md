@@ -190,7 +190,7 @@ public class MyCustomProcessor : AsepriteProcessor
     public override string DisplayName => "My Custom Processor";
     public override int ProcessOrder => 100;
 
-    public override bool ShouldProcess(AssetImportContext ctx, AsepriteImporter importer, AsepriteImportResult result)
+    public override bool ShouldProcess(AssetImportContext ctx, AsepriteImporter importer)
     {
         // 仅处理特定目录下的资源
         return ctx.assetPath.Contains("/MyFolder/");

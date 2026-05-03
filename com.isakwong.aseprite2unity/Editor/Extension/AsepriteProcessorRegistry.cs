@@ -86,6 +86,8 @@ namespace Aseprite2Unity.Editor
             {
                 try
                 {
+                    if (!processor.ShouldProcess(ctx, importer)) continue;
+
                     var gameObject = processor.TryCreateImportedGameObject(ctx, importer);
                     if (gameObject != null)
                         return gameObject;
@@ -127,7 +129,7 @@ namespace Aseprite2Unity.Editor
             {
                 try
                 {
-                    if (!processor.ShouldProcess(ctx, importer, result))
+                    if (!processor.ShouldProcess(ctx, importer))
                         continue;
 
                     processor.OnImportAseprite(ctx, importer, result);
