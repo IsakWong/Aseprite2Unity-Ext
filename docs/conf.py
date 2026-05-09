@@ -19,9 +19,9 @@
 
 # -- Project information -----------------------------------------------------
 
-project = 'Aseprite2Unity'
-copyright = '2019, Sean Barton'
-author = 'Sean Barton'
+project = 'Aseprite2Unity-Ext'
+copyright = '2019, Sean Barton; 2026, IsakWong'
+author = 'IsakWong'
 
 # The short X.Y version
 version = ''
